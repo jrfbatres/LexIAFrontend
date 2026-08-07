@@ -128,6 +128,7 @@ export default function LexiaAssistant() {
   const fileInputRef = React.useRef(null);
   const fileInputRefAuditora = React.useRef(null);
   const chatEndRef = React.useRef(null);
+  const occurrencesCache = React.useRef({});
   const [scrollToLastBlock, setScrollToLastBlock] = React.useState(false);
   const [correctedErrors, setCorrectedErrors] = React.useState(new Set());
 
@@ -235,7 +236,7 @@ export default function LexiaAssistant() {
             .replace(/\n/g, '<br/>');
         }
         
-        const htmlContent = `<h2>Documento Original: ${fileName}</h2><hr/><br/>${displayHtml}`;
+        const htmlContent = displayHtml;
         
         setEditorTabs(prevTabs => {
           const existingTabIndex = prevTabs.findIndex(t => t.id === tabIdForConv);
@@ -257,7 +258,31 @@ export default function LexiaAssistant() {
           }
         });
 
-        const customInstruction = "Analiza el documento adjunto. Extrae qué documento es, quiénes son los participantes y en qué calidad actúan. También analiza que no existan errores de ortografía en el documento y verifica que las cantidades y fechas estén escritas en letras (no en números). IMPORTANTE: Si encuentras errores, enuméralos al final usando EXACTAMENTE el siguiente formato estricto por cada error (no uses cursivas ni omitas comillas): [ERROR: \"texto original con error\" -> \"texto corregido\"]. Luego, pregúntame si deseo anexar más archivos para revisar (DUI u otros).";
+        const customInstruction = `Analiza el documento adjunto y presenta el resultado de la siguiente manera estructurada:
+
+1. TIPO DE DOCUMENTO: Indica únicamente el tipo de documento.
+2. PARTICIPANTES: Lista cada participante como un bloque, línea por línea. Por ejemplo:
+MANDANTE (o la calidad que corresponda)
+- Nombre: [nombre]
+- DUI: [números]
+- Dirección: [dirección]
+
+3. RESULTADO DE AUDITORÍA (Solo para hallazgos complejos):
+Analiza el documento en busca de inconsistencias legales, problemas estructurales o riesgos importantes. IMPORTANTE: NO incluyas aquí los errores ortográficos menores, errores de redacción simple o números que deban ser letras (esos se manejan aparte). Tampoco consideres como hallazgos los problemas de concordancia plural/singular, ni los espacios en blanco o líneas "______" (esos espacios están a propósito para que los rellene el consulado). Para cada problema legal o estructural complejo, detállalo exactamente así (mantén las explicaciones MUY breves y directas al grano):
+
+Hallazgo [Número] — [Título breve]
+Tipo: [Estructural / Legal / Inconsistencia]
+Sección: [Dónde se encuentra]
+Problema: [Explicación breve y corta del problema]
+Riesgo: [Riesgo breve si no se corrige]
+Corrección propuesta: [Propuesta de corrección concisa]
+Estado: Pendiente de revisión manual.
+
+4. CORRECCIONES DIRECTAS (Oculto):
+Al puro final de tu respuesta, DEBES agregar las instrucciones de reemplazo de texto exacto para todos los errores menores (ortografía, concordancia plural/singular, números por letras, formato, etc.) usando EXACTAMENTE este formato por cada error que requiera corrección en el texto (usa comillas dobles, no uses Markdown ni cursivas). IMPORTANTE: Ignora los espacios en blanco o guiones bajos (______), no propongas correcciones para ellos.
+[ERROR: "texto original exacto" -> "texto corregido exacto"]
+
+Finalmente, pregúntame si deseo anexar más archivos (DUI u otros) para revisión cruzada.`;
         handleSendMessage([fileData], customInstruction, `[Documento cargado: ${fileName}]`);
       } catch (err) {
         console.error("Error al extraer texto:", err);
@@ -319,8 +344,8 @@ export default function LexiaAssistant() {
       return prevTabs.map(tab => {
         if (tab.id === activeTabId) {
           let newContent = tab.content;
-          const replacementHtml = `<span style="color: #16a34a; font-weight: bold;">${correctedText}</span>`;
-          const highlightRegex = new RegExp(`<mark>${escapeRegExp(originalText)}</mark>`, 'gi');
+          const replacementHtml = `<strong><span style="color: #16a34a">${correctedText}</span></strong>`;
+          const highlightRegex = new RegExp(`<mark[^>]*>${escapeRegExp(originalText)}</mark>`, 'gi');
           if (newContent.match(highlightRegex)) {
             newContent = newContent.replace(highlightRegex, replacementHtml);
           } else {
@@ -340,7 +365,7 @@ export default function LexiaAssistant() {
       return prevTabs.map(tab => {
         if (tab.id === activeTabId) {
           let newContent = tab.content;
-          const highlightRegex = new RegExp(`<mark>${escapeRegExp(originalText)}</mark>`, 'gi');
+          const highlightRegex = new RegExp(`<mark[^>]*>${escapeRegExp(originalText)}</mark>`, 'gi');
           
           if (isHovering && !newContent.match(highlightRegex)) {
             const regex = new RegExp(`\\b${escapeRegExp(originalText)}\\b`, 'i');
@@ -379,11 +404,17 @@ export default function LexiaAssistant() {
       const originalText = match[1];
       const correctedText = match[2];
       
-      // Calculate how many times it appears in the text
+      // Calculate how many times it appears in the text and cache it to prevent UI shifting
       const activeTab = editorTabs.find(t => t.id === activeTabId);
       const textContentStr = activeTab ? activeTab.content : '';
       const textMatches = textContentStr.match(new RegExp(`\\b${escapeRegExp(originalText)}\\b`, 'gi'));
-      const occurrencesCount = textMatches ? textMatches.length : 1;
+      const currentCount = textMatches ? textMatches.length : 1;
+      
+      const cacheKey = `${match.index}-${originalText}`;
+      if (!occurrencesCache.current[cacheKey] || occurrencesCache.current[cacheKey] < currentCount) {
+        occurrencesCache.current[cacheKey] = currentCount;
+      }
+      const occurrencesCount = occurrencesCache.current[cacheKey];
       
       for (let i = 0; i < occurrencesCount; i++) {
         const errorKey = `${match.index}-${i}`;
@@ -513,7 +544,7 @@ export default function LexiaAssistant() {
         
         setChatsByModality(prev => ({ 
           ...prev, 
-          [modality]: [...updatedMessages, { role: "model", parts: [{ text: finalResponseText }] }] 
+          [modality]: [...updatedMessages, { role: "model", parts: [{ text: finalResponseText }], usage: data.usage }] 
         }));
       } else {
         console.error("No response from server:", data);
@@ -840,8 +871,20 @@ export default function LexiaAssistant() {
               </div>
             ) : (
               (chatsByModality[modality] || []).map((msg, idx) => (
-                <div key={idx} className={`p-3 rounded-lg text-sm max-w-[85%] ${msg.role === 'user' ? 'bg-primary text-on-primary self-end whitespace-pre-wrap' : 'bg-surface-container text-on-surface self-start whitespace-pre-wrap'}`}>
+                <div key={idx} className={`p-3 rounded-lg text-sm max-w-[85%] ${msg.role === 'user' ? 'bg-primary text-on-primary self-end whitespace-pre-wrap' : 'bg-surface-container text-on-surface self-start whitespace-pre-wrap flex flex-col gap-2'}`}>
                   {renderChatMessage(msg.parts[0].text, msg.role)}
+                  {msg.usage && msg.usage.totalTokenCount && (
+                    <div className="flex gap-2 self-start mt-1">
+                      <div className="bg-secondary/10 border border-secondary/30 text-secondary text-[10px] px-2 py-1 rounded-md font-bold flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[12px]">data_usage</span>
+                        Tokens: {msg.usage.totalTokenCount}
+                      </div>
+                      <div className="bg-secondary/10 border border-secondary/30 text-secondary text-[10px] px-2 py-1 rounded-md font-bold flex items-center gap-1" title="Costo aproximado (Gemini 1.5 Flash API)">
+                        <span className="material-symbols-outlined text-[12px]">payments</span>
+                        Costo aprox: ${(msg.usage.promptTokenCount * 0.15 / 1000000 + msg.usage.candidatesTokenCount * 0.60 / 1000000).toFixed(5)} USD
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))
             )}
