@@ -126,8 +126,10 @@ export default function LexiaAssistant() {
   const [isChatLoading, setIsChatLoading] = React.useState(false);
   const [attachedFiles, setAttachedFiles] = React.useState([]);
   const fileInputRef = React.useRef(null);
+  const fileInputRefAuditora = React.useRef(null);
   const chatEndRef = React.useRef(null);
   const [scrollToLastBlock, setScrollToLastBlock] = React.useState(false);
+  const [correctedErrors, setCorrectedErrors] = React.useState(new Set());
 
   React.useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -170,9 +172,96 @@ export default function LexiaAssistant() {
         });
       });
       Promise.all(newFiles).then(files => {
-        // Enviar automáticamente al adjuntar
         handleSendMessage(files);
       });
+    }
+  };
+
+  const handleAuditoraFileChange = async (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      
+      const extractText = async (f) => {
+        if (f.type === "application/pdf") {
+          const pdfjsLib = await import('pdfjs-dist/build/pdf.mjs');
+          pdfjsLib.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+          const arrayBuffer = await f.arrayBuffer();
+          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          let text = '';
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            text += content.items.map(item => item.str).join(' ') + '\n';
+          }
+          return text;
+        } else if (f.name.endsWith(".docx") || f.type.includes("wordprocessingml")) {
+          const mammoth = await import('mammoth/mammoth.browser');
+          const arrayBuffer = await f.arrayBuffer();
+          const result = await mammoth.extractRawText({ arrayBuffer });
+          return result.value;
+        } else {
+          return new Promise((resolve) => {
+            const textReader = new FileReader();
+            textReader.onloadend = () => resolve(textReader.result);
+            textReader.readAsText(f);
+          });
+        }
+      };
+      
+      const readAsBase64 = new Promise((resolve) => {
+        const b64Reader = new FileReader();
+        b64Reader.onloadend = () => {
+          resolve({
+            name: file.name,
+            type: file.type,
+            base64: b64Reader.result.split(',')[1]
+          });
+        };
+        b64Reader.readAsDataURL(file);
+      });
+
+      try {
+        const [textContent, fileData] = await Promise.all([extractText(file), readAsBase64]);
+        const fileName = fileData.name;
+        const currentConvId = activeConversations['AUDITORA'];
+        const tabIdForConv = `auditoria_${currentConvId}`;
+        
+        let displayHtml = textContent || '';
+        if (!fileData.type.includes('html')) {
+          displayHtml = displayHtml
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/\n/g, '<br/>');
+        }
+        
+        const htmlContent = `<h2>Documento Original: ${fileName}</h2><hr/><br/>${displayHtml}`;
+        
+        setEditorTabs(prevTabs => {
+          const existingTabIndex = prevTabs.findIndex(t => t.id === tabIdForConv);
+          if (existingTabIndex >= 0) {
+             let newTabs = [...prevTabs];
+             newTabs[existingTabIndex].content = htmlContent;
+             setTimeout(() => setActiveTabId(tabIdForConv), 0);
+             return newTabs;
+          } else {
+             const auditoriaTabs = prevTabs.filter(t => t.id.startsWith('auditoria_'));
+             let newTabs = [...prevTabs];
+             if (auditoriaTabs.length >= 3) {
+                newTabs = newTabs.filter(t => t.id !== auditoriaTabs[0].id);
+             }
+             const newTab = { id: tabIdForConv, title: `AUDITORÍA - ${fileName.substring(0, 15)}`, content: htmlContent };
+             newTabs.push(newTab);
+             setTimeout(() => setActiveTabId(tabIdForConv), 0);
+             return newTabs;
+          }
+        });
+
+        const customInstruction = "Analiza el documento adjunto. Extrae qué documento es, quiénes son los participantes y en qué calidad actúan. También analiza que no existan errores de ortografía en el documento y verifica que las cantidades y fechas estén escritas en letras (no en números). IMPORTANTE: Si encuentras errores, enuméralos al final usando EXACTAMENTE el siguiente formato estricto por cada error (no uses cursivas ni omitas comillas): [ERROR: \"texto original con error\" -> \"texto corregido\"]. Luego, pregúntame si deseo anexar más archivos para revisar (DUI u otros).";
+        handleSendMessage([fileData], customInstruction, `[Documento cargado: ${fileName}]`);
+      } catch (err) {
+        console.error("Error al extraer texto:", err);
+      }
     }
   };
 
@@ -182,15 +271,172 @@ export default function LexiaAssistant() {
     setChatsByModality(prev => ({ ...prev, [modality]: [] }));
   };
 
-  const handleSendMessage = async (overrideFiles = null) => {
-    // Si overrideFiles es un evento (e.g. onClick), ignorarlo y usar attachedFiles
+  const handleSaveDocument = () => {
+    const activeTab = editorTabs.find(t => t.id === activeTabId);
+    if (!activeTab || !activeTab.content) return;
+    
+    const htmlContent = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"></head><body style="text-align: justify; font-family: sans-serif;">${activeTab.content}</body></html>`;
+
+    const blob = new Blob([htmlContent], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${activeTab.title || 'documento'}.doc`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCloseTab = (e, tabId) => {
+    e.stopPropagation();
+    let newTabs = editorTabs.filter(t => t.id !== tabId);
+    if (newTabs.length === 0) {
+      newTabs = [{ id: 'tab_default', title: 'Documento 1', content: '' }];
+    }
+    if (activeTabId === tabId) {
+      setActiveTabId(newTabs[newTabs.length - 1].id);
+    }
+    setEditorTabs(newTabs);
+  };
+
+  const escapeRegExp = (string) => {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  };
+
+  const replaceNthOccurrence = (str, regex, replacement, n) => {
+    let count = 0;
+    return str.replace(new RegExp(regex.source, 'gi'), match => {
+      if (count === n) {
+        count++;
+        return typeof replacement === 'function' ? replacement(match) : replacement;
+      }
+      count++;
+      return match;
+    });
+  };
+
+  const handleCorrectError = (originalText, correctedText, index = 0, errorKey) => {
+    setEditorTabs(prevTabs => {
+      return prevTabs.map(tab => {
+        if (tab.id === activeTabId) {
+          let newContent = tab.content;
+          const replacementHtml = `<span style="color: #16a34a; font-weight: bold;">${correctedText}</span>`;
+          const highlightRegex = new RegExp(`<mark>${escapeRegExp(originalText)}</mark>`, 'gi');
+          if (newContent.match(highlightRegex)) {
+            newContent = newContent.replace(highlightRegex, replacementHtml);
+          } else {
+            const regex = new RegExp(`\\b${escapeRegExp(originalText)}\\b`, 'i');
+            newContent = replaceNthOccurrence(newContent, regex, replacementHtml, index);
+          }
+          return { ...tab, content: newContent };
+        }
+        return tab;
+      });
+    });
+    setCorrectedErrors(prev => new Set(prev).add(errorKey));
+  };
+
+  const handleHoverError = (originalText, isHovering, index = 0) => {
+    setEditorTabs(prevTabs => {
+      return prevTabs.map(tab => {
+        if (tab.id === activeTabId) {
+          let newContent = tab.content;
+          const highlightRegex = new RegExp(`<mark>${escapeRegExp(originalText)}</mark>`, 'gi');
+          
+          if (isHovering && !newContent.match(highlightRegex)) {
+            const regex = new RegExp(`\\b${escapeRegExp(originalText)}\\b`, 'i');
+            newContent = replaceNthOccurrence(newContent, regex, `<mark>${originalText}</mark>`, index);
+            setTimeout(() => {
+              const mark = document.querySelector('.ProseMirror mark');
+              if (mark) {
+                mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+            }, 150); // Increased timeout to ensure Tiptap has updated the DOM
+          } else if (!isHovering && newContent.match(highlightRegex)) {
+            newContent = newContent.replace(highlightRegex, originalText);
+          }
+          return { ...tab, content: newContent };
+        }
+        return tab;
+      });
+    });
+  };
+
+  const renderChatMessage = (text, role) => {
+    if (role === 'user') return text;
+    const errorRegex = /\[ERROR:\s*"([^"]+)"\s*->\s*"([^"]+)"\]/g;
+    
+    if (!text.match(errorRegex)) return text;
+    
+    const parts = [];
+    let lastIndex = 0;
+    let match;
+    
+    const regex = /\[ERROR:\s*"([^"]+)"\s*->\s*"([^"]+)"\]/g;
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(text.substring(lastIndex, match.index));
+      }
+      const originalText = match[1];
+      const correctedText = match[2];
+      
+      // Calculate how many times it appears in the text
+      const activeTab = editorTabs.find(t => t.id === activeTabId);
+      const textContentStr = activeTab ? activeTab.content : '';
+      const textMatches = textContentStr.match(new RegExp(`\\b${escapeRegExp(originalText)}\\b`, 'gi'));
+      const occurrencesCount = textMatches ? textMatches.length : 1;
+      
+      for (let i = 0; i < occurrencesCount; i++) {
+        const errorKey = `${match.index}-${i}`;
+        const isCorrected = correctedErrors.has(errorKey);
+        
+        parts.push(
+          <div 
+            key={errorKey} 
+            className="my-2 p-2 border border-secondary/30 bg-surface-container-low rounded-lg shadow-sm flex flex-col gap-2 transition-all hover:border-secondary"
+            onMouseEnter={() => { if (!isCorrected) handleHoverError(originalText, true, i); }}
+            onMouseLeave={() => { if (!isCorrected) handleHoverError(originalText, false, i); }}
+          >
+            <div className="text-xs">
+              <span className="line-through text-error mr-2">{originalText}</span>
+              <span className="text-primary font-bold">→ {correctedText}</span>
+              {occurrencesCount > 1 && <span className="ml-2 text-on-surface-variant italic">(Coincidencia {i + 1})</span>}
+            </div>
+            {isCorrected ? (
+              <div className="self-start text-[11px] text-green-600 font-bold px-2 py-1 flex items-center gap-1">
+                <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                Corregido
+              </div>
+            ) : (
+              <button
+                onClick={() => handleCorrectError(originalText, correctedText, i, errorKey)}
+                className="self-start text-[11px] bg-secondary text-on-secondary px-2 py-1 rounded hover:bg-secondary/90 transition-colors"
+              >
+                Corregir
+              </button>
+            )}
+          </div>
+        );
+      }
+      
+      lastIndex = regex.lastIndex;
+    }
+    
+    if (lastIndex < text.length) {
+      parts.push(text.substring(lastIndex));
+    }
+    
+    return parts;
+  };
+
+  const handleSendMessage = async (overrideFiles = null, overrideMessage = null, overrideDisplay = null) => {
     const isEvent = overrideFiles && overrideFiles.target;
-    const filesToUse = (overrideFiles && Array.isArray(overrideFiles)) ? overrideFiles : attachedFiles;
+    const filesToUse = (overrideFiles && Array.isArray(overrideFiles) && !isEvent) ? overrideFiles : attachedFiles;
     
-    if (!inputValue.trim() && filesToUse.length === 0) return;
+    const actualInputValue = (typeof overrideMessage === 'string') ? overrideMessage : inputValue.trim();
+    if (!actualInputValue && filesToUse.length === 0) return;
     
-    const newMessage = inputValue.trim() || "Revisa este archivo adjunto.";
-    let displayMessage = inputValue.trim();
+    const newMessage = actualInputValue || "Revisa este archivo adjunto.";
+    let displayMessage = (typeof overrideDisplay === 'string') ? overrideDisplay : actualInputValue;
     if (!displayMessage && filesToUse.length > 0) {
       displayMessage = `[Archivo adjunto: ${filesToUse.map(f => f.name).join(', ')}]`;
     }
@@ -233,13 +479,28 @@ export default function LexiaAssistant() {
                setActiveTabId(tabIdForConv);
                return newTabs;
             } else {
-               // Create new tab
                const asesoriaTabs = prevTabs.filter(t => t.id.startsWith('asesoria_'));
                let newTabs = [...prevTabs];
                if (asesoriaTabs.length >= 3) {
                   newTabs = newTabs.filter(t => t.id !== asesoriaTabs[0].id);
                }
-               const newTab = { id: tabIdForConv, title: 'ASESORÍA LEGAL', content: htmlContent };
+               
+               let docType = "DOCUMENTO";
+               const msgUpper = newMessage.toUpperCase();
+               if (msgUpper.includes("ARRENDAMIENTO")) docType = "ARRENDAMIENTO";
+               else if (msgUpper.includes("COMPRA") || msgUpper.includes("VENTA")) docType = "COMPRAVENTA";
+               else if (msgUpper.includes("PODER")) docType = "PODER";
+               else if (msgUpper.includes("MUTUO")) docType = "MUTUO";
+               else if (msgUpper.includes("SOCIEDAD")) docType = "SOCIEDAD";
+               else if (msgUpper.includes("LABORAL")) docType = "LABORAL";
+
+               let dynamicTitle = `${docType} - Cliente`;
+               const headingMatch = finalResponseText.match(/^#+\s+(.+)$/m);
+               if (headingMatch && headingMatch[1]) {
+                 dynamicTitle = headingMatch[1].substring(0, 35).toUpperCase();
+               }
+
+               const newTab = { id: tabIdForConv, title: dynamicTitle, content: htmlContent };
                newTabs.push(newTab);
                setActiveTabId(tabIdForConv);
                return newTabs;
@@ -335,21 +596,28 @@ export default function LexiaAssistant() {
               Conversaciones
             </div>
             {editorTabs.map(tab => (
-              <a
+              <div
                 key={tab.id}
-                href="#"
                 onClick={(e) => { e.preventDefault(); setActiveTabId(tab.id); }}
-                className={`flex items-center px-stack-sm py-stack-sm rounded-lg transition-all ${
+                className={`flex items-center justify-between px-stack-sm py-stack-sm rounded-lg transition-all cursor-pointer ${
                   activeTabId === tab.id
                     ? 'bg-secondary-container text-on-secondary-container font-bold'
                     : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
                 }`}
               >
-                <span className="material-symbols-outlined mr-3">
-                  {tab.id.startsWith('asesoria') ? 'gavel' : 'description'}
-                </span>
-                {tab.title}
-              </a>
+                <div className="flex items-center overflow-hidden">
+                  <span className="material-symbols-outlined mr-3 shrink-0">
+                    {tab.id.startsWith('asesoria') ? 'gavel' : 'description'}
+                  </span>
+                  <span className="truncate">{tab.title}</span>
+                </div>
+                <button 
+                  onClick={(e) => handleCloseTab(e, tab.id)}
+                  className="hover:bg-black/10 rounded-full p-1 flex items-center justify-center transition-colors shrink-0"
+                >
+                  <span className="material-symbols-outlined text-[14px]">close</span>
+                </button>
+              </div>
             ))}
           </nav>
         </aside>
@@ -461,22 +729,11 @@ export default function LexiaAssistant() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button className="h-8 px-3 rounded-lg bg-surface-container text-on-surface hover:bg-surface-container-high transition-colors flex items-center gap-1.5 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
+                      <button onClick={handleSaveDocument} className="h-8 px-3 rounded-lg bg-[#2B579A] text-white hover:bg-[#1E3E6D] transition-colors flex items-center gap-1.5 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
                         <span className="material-symbols-outlined text-[16px]">
-                          add_comment
+                          save
                         </span>
-                        <span className="text-[13px] font-medium">{t.comment}</span>
-                      </button>
-                      <button className="h-8 px-3 rounded-lg bg-primary-container text-on-primary-container hover:bg-primary-container/90 transition-colors flex items-center gap-1.5 shadow-[0_2px_4px_rgba(13,28,50,0.1)]">
-                        <span
-                          className="material-symbols-outlined text-[16px]"
-                          style={{ fontVariationSettings: "&quot" }}
-                        >
-                          magic_button
-                        </span>
-                        <span className="text-[13px] font-medium">
-                          {t.aiTools}
-                        </span>
+                        <span className="text-[13px] font-medium">Guardar</span>
                       </button>
                     </div>
                   </div>
@@ -484,17 +741,23 @@ export default function LexiaAssistant() {
                   {/* Pestañas (Tabs) en el editor */}
                   <div className="flex bg-surface-container-low border-b border-outline-variant/30 px-6 pt-2">
                     {editorTabs.map(tab => (
-                       <button
+                       <div
                          key={tab.id}
                          onClick={() => setActiveTabId(tab.id)}
-                         className={`py-2 px-4 text-sm font-medium border-b-2 transition-colors ${
+                         className={`flex items-center gap-2 py-2 px-4 text-sm font-medium border-b-2 transition-colors cursor-pointer ${
                            activeTabId === tab.id
                              ? 'border-primary text-primary'
                              : 'border-transparent text-on-surface-variant hover:text-on-surface hover:border-outline-variant'
                          }`}
                        >
-                         {tab.title}
-                       </button>
+                         <span className="truncate max-w-[150px]">{tab.title}</span>
+                         <button 
+                           onClick={(e) => handleCloseTab(e, tab.id)}
+                           className="hover:bg-black/10 rounded-full w-4 h-4 flex items-center justify-center transition-colors"
+                         >
+                           <span className="material-symbols-outlined text-[12px]">close</span>
+                         </button>
+                       </div>
                     ))}
                   </div>
 
@@ -560,15 +823,25 @@ export default function LexiaAssistant() {
           </div>
           <div className="flex-1 overflow-y-auto p-stack-md space-y-stack-md flex flex-col chat-scrollbar">
             {(chatsByModality[modality] || []).length === 0 ? (
-              <div className="bg-surface-container p-stack-sm rounded-lg text-xs text-on-surface-variant border-l-4 border-secondary">
-                {modality === 'ASISTENTE' && '¿Qué documento quieres que creemos?'}
-                {modality === 'ASESORA' && 'Comienza un intake'}
-                {modality === 'AUDITORA' && '¿Qué documento deseas revisar?'}
+              <div className="bg-surface-container p-stack-sm rounded-lg text-xs text-on-surface-variant border-l-4 border-secondary flex flex-col gap-2 items-start">
+                {modality === 'ASISTENTE' && <span>¿Qué documento quieres que creemos?</span>}
+                {modality === 'ASESORA' && <span>Hola, soy LexIA tu asesora legal. ¿En qué puedo ayudarle ahora?</span>}
+                {modality === 'AUDITORA' && (
+                  <>
+                    <span>¿Qué documento desea analizar?</span>
+                    <button 
+                      onClick={() => fileInputRefAuditora.current.click()} 
+                      className="bg-primary text-on-primary px-3 py-1.5 rounded-md text-[11px] font-bold hover:bg-primary/90 transition-colors"
+                    >
+                      Añadir documento
+                    </button>
+                  </>
+                )}
               </div>
             ) : (
               (chatsByModality[modality] || []).map((msg, idx) => (
                 <div key={idx} className={`p-3 rounded-lg text-sm max-w-[85%] ${msg.role === 'user' ? 'bg-primary text-on-primary self-end whitespace-pre-wrap' : 'bg-surface-container text-on-surface self-start whitespace-pre-wrap'}`}>
-                  {msg.parts[0].text}
+                  {renderChatMessage(msg.parts[0].text, msg.role)}
                 </div>
               ))
             )}
@@ -600,10 +873,11 @@ export default function LexiaAssistant() {
             )}
             <div className="relative">
               <textarea
-                className={`w-full bg-surface-container-lowest border border-outline-variant rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-secondary resize-none h-24 ${modality === 'ASESORA' ? 'pl-10 pr-10 py-stack-sm' : 'p-stack-sm'}`}
-                placeholder={t.askPlaceholder}
+                className={`w-full bg-surface-container-lowest border border-outline-variant rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-secondary resize-none h-24 ${modality === 'ASESORA' ? 'pl-10 pr-10 py-stack-sm' : 'p-stack-sm'} ${modality === 'AUDITORA' ? 'opacity-50 cursor-not-allowed bg-surface-container' : ''}`}
+                placeholder={modality === 'AUDITORA' ? "Chat deshabilitado (Use el botón 'Añadir documento' arriba)" : t.askPlaceholder}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
+                disabled={modality === 'AUDITORA'}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
@@ -630,9 +904,17 @@ export default function LexiaAssistant() {
                   />
                 </div>
               )}
+              <input
+                type="file"
+                multiple
+                ref={fileInputRefAuditora}
+                style={{ display: 'none' }}
+                onChange={handleAuditoraFileChange}
+                accept="application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+              />
               <button 
                 onClick={handleSendMessage}
-                disabled={isChatLoading}
+                disabled={isChatLoading || modality === 'AUDITORA'}
                 className="absolute right-2 bottom-2 text-secondary hover:text-on-secondary-container transition-colors disabled:opacity-50"
               >
                 <span className="material-symbols-outlined">send</span>
