@@ -1,7 +1,5 @@
 "use client";
 import React from "react";
-import { marked } from "marked";
-import TiptapEditor from "../components/TiptapEditor";
 
 const translations = {
   ES: {
@@ -105,165 +103,6 @@ export default function LexiaAssistant() {
   const [isResizingLeft, setIsResizingLeft] = React.useState(false);
   const [isResizingRight, setIsResizingRight] = React.useState(false);
 
-  const [chatsByModality, setChatsByModality] = React.useState({
-    ASISTENTE: [],
-    ASESORA: [],
-    AUDITORA: []
-  });
-  
-  const [editorTabs, setEditorTabs] = React.useState([
-    { id: 'tab_default', title: 'Documento 1', content: '' }
-  ]);
-  const [activeTabId, setActiveTabId] = React.useState('tab_default');
-  
-  const [activeConversations, setActiveConversations] = React.useState({
-    ASISTENTE: `conv_${Date.now()}_ASISTENTE`,
-    ASESORA: `conv_${Date.now()}_ASESORA`,
-    AUDITORA: `conv_${Date.now()}_AUDITORA`
-  });
-  
-  const [inputValue, setInputValue] = React.useState("");
-  const [isChatLoading, setIsChatLoading] = React.useState(false);
-  const [attachedFiles, setAttachedFiles] = React.useState([]);
-  const fileInputRef = React.useRef(null);
-  const chatEndRef = React.useRef(null);
-  const [scrollToLastBlock, setScrollToLastBlock] = React.useState(false);
-
-  React.useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatsByModality, modality, isChatLoading]);
-
-  React.useEffect(() => {
-    if (scrollToLastBlock) {
-      const timer = setTimeout(() => {
-        const editorContainers = document.querySelectorAll('.ProseMirror');
-        for (const container of editorContainers) {
-          if (container.offsetParent !== null) { // if visible
-            const hrs = container.querySelectorAll('hr');
-            if (hrs.length > 0) {
-              hrs[hrs.length - 1].scrollIntoView({ behavior: 'smooth', block: 'start' });
-            } else {
-              container.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-            break;
-          }
-        }
-        setScrollToLastBlock(false);
-      }, 200);
-      return () => clearTimeout(timer);
-    }
-  }, [scrollToLastBlock, editorTabs]);
-
-  const handleFileChange = (e) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const newFiles = Array.from(e.target.files).map(file => {
-        return new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            resolve({
-              name: file.name,
-              type: file.type,
-              base64: reader.result.split(',')[1] // extract base64
-            });
-          };
-          reader.readAsDataURL(file);
-        });
-      });
-      Promise.all(newFiles).then(files => {
-        // Enviar automáticamente al adjuntar
-        handleSendMessage(files);
-      });
-    }
-  };
-
-  const handleNewChat = () => {
-    const newId = `conv_${Date.now()}_${modality}`;
-    setActiveConversations(prev => ({ ...prev, [modality]: newId }));
-    setChatsByModality(prev => ({ ...prev, [modality]: [] }));
-  };
-
-  const handleSendMessage = async (overrideFiles = null) => {
-    // Si overrideFiles es un evento (e.g. onClick), ignorarlo y usar attachedFiles
-    const isEvent = overrideFiles && overrideFiles.target;
-    const filesToUse = (overrideFiles && Array.isArray(overrideFiles)) ? overrideFiles : attachedFiles;
-    
-    if (!inputValue.trim() && filesToUse.length === 0) return;
-    
-    const newMessage = inputValue.trim() || "Revisa este archivo adjunto.";
-    let displayMessage = inputValue.trim();
-    if (!displayMessage && filesToUse.length > 0) {
-      displayMessage = `[Archivo adjunto: ${filesToUse.map(f => f.name).join(', ')}]`;
-    }
-    
-    setInputValue("");
-    setAttachedFiles([]);
-    
-    const currentMessages = chatsByModality[modality] || [];
-    const updatedMessages = [...currentMessages, { role: "user", parts: [{ text: displayMessage }] }];
-    setChatsByModality(prev => ({ ...prev, [modality]: updatedMessages }));
-    setIsChatLoading(true);
-    
-    try {
-      const response = await fetch("http://localhost:3001/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          message: newMessage,
-          history: currentMessages,
-          modality: modality,
-          files: filesToUse
-        })
-      });
-      const data = await response.json();
-      if (data.response) {
-        let finalResponseText = data.response;
-        
-        if (modality === 'ASESORA' && finalResponseText.split('\n').length > 20) {
-          const htmlContent = marked.parse(finalResponseText);
-          const currentConvId = activeConversations[modality];
-          const tabIdForConv = `asesoria_${currentConvId}`;
-          
-          setEditorTabs(prevTabs => {
-            const existingTabIndex = prevTabs.findIndex(t => t.id === tabIdForConv);
-            
-            if (existingTabIndex >= 0) {
-               // Apend to existing tab for this conversation
-               let newTabs = [...prevTabs];
-               newTabs[existingTabIndex].content += `<br/><hr/><br/>${htmlContent}`;
-               setActiveTabId(tabIdForConv);
-               return newTabs;
-            } else {
-               // Create new tab
-               const asesoriaTabs = prevTabs.filter(t => t.id.startsWith('asesoria_'));
-               let newTabs = [...prevTabs];
-               if (asesoriaTabs.length >= 3) {
-                  newTabs = newTabs.filter(t => t.id !== asesoriaTabs[0].id);
-               }
-               const newTab = { id: tabIdForConv, title: 'ASESORÍA LEGAL', content: htmlContent };
-               newTabs.push(newTab);
-               setActiveTabId(tabIdForConv);
-               return newTabs;
-            }
-          });
-          
-          finalResponseText = "He añadido el análisis detallado a la pestaña ASESORÍA LEGAL de esta conversación.";
-          setScrollToLastBlock(true);
-        }
-        
-        setChatsByModality(prev => ({ 
-          ...prev, 
-          [modality]: [...updatedMessages, { role: "model", parts: [{ text: finalResponseText }] }] 
-        }));
-      } else {
-        console.error("No response from server:", data);
-      }
-    } catch (error) {
-      console.error("Error sending message:", error);
-    } finally {
-      setIsChatLoading(false);
-    }
-  };
-
   React.useEffect(() => {
     const handleMouseMove = (e) => {
       if (isResizingLeft) {
@@ -303,9 +142,6 @@ export default function LexiaAssistant() {
           __html: `
         /* Custom styles */
         @layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}
-        .chat-scrollbar::-webkit-scrollbar { display: block; width: 6px; }
-        .chat-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 4px; }
-        .dark .chat-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); }
       `,
         }}
       />
@@ -319,10 +155,7 @@ export default function LexiaAssistant() {
             onMouseDown={() => setIsResizingLeft(true)}
           ></div>
           <div className="px-stack-md my-stack-md">
-            <button 
-              onClick={handleNewChat}
-              className="w-full flex items-center justify-center gap-stack-sm bg-primary text-on-primary py-stack-sm rounded-lg font-label-caps hover:bg-primary-container transition-colors"
-            >
+            <button className="w-full flex items-center justify-center gap-stack-sm bg-primary text-on-primary py-stack-sm rounded-lg font-label-caps hover:bg-primary-container transition-colors">
               <span className="material-symbols-outlined text-[18px]">add</span>
               {t.newChat}
             </button>
@@ -332,25 +165,27 @@ export default function LexiaAssistant() {
             data-active-classes="bg-secondary-container text-on-secondary-container font-bold"
           >
             <div className="text-on-surface-variant font-label-caps text-[10px] px-stack-sm py-stack-sm mt-stack-md">
-              Conversaciones
+              {t.actions}
             </div>
-            {editorTabs.map(tab => (
-              <a
-                key={tab.id}
-                href="#"
-                onClick={(e) => { e.preventDefault(); setActiveTabId(tab.id); }}
-                className={`flex items-center px-stack-sm py-stack-sm rounded-lg transition-all ${
-                  activeTabId === tab.id
-                    ? 'bg-secondary-container text-on-secondary-container font-bold'
-                    : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
-                }`}
-              >
-                <span className="material-symbols-outlined mr-3">
-                  {tab.id.startsWith('asesoria') ? 'gavel' : 'description'}
-                </span>
-                {tab.title}
-              </a>
-            ))}
+            <a
+              aria-current="page"
+              className="flex items-center px-stack-sm py-stack-sm rounded-lg transition-all bg-secondary-container text-on-secondary-container font-bold"
+              data-path="crear-documento"
+              href="#"
+            >
+              <span className="material-symbols-outlined mr-3">note_add</span>
+              {t.createDoc}
+            </a>
+            <a
+              className="flex items-center px-stack-sm py-stack-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all"
+              data-path="revisar-documento"
+              href="#"
+            >
+              <span className="material-symbols-outlined mr-3">
+                fact_check
+              </span>
+              {t.reviewDoc}
+            </a>
           </nav>
         </aside>
         <div style={{ paddingLeft: `${leftWidth}px`, paddingRight: `${rightWidth}px` }}>
@@ -481,36 +316,10 @@ export default function LexiaAssistant() {
                     </div>
                   </div>
 
-                  {/* Pestañas (Tabs) en el editor */}
-                  <div className="flex bg-surface-container-low border-b border-outline-variant/30 px-6 pt-2">
-                    {editorTabs.map(tab => (
-                       <button
-                         key={tab.id}
-                         onClick={() => setActiveTabId(tab.id)}
-                         className={`py-2 px-4 text-sm font-medium border-b-2 transition-colors ${
-                           activeTabId === tab.id
-                             ? 'border-primary text-primary'
-                             : 'border-transparent text-on-surface-variant hover:text-on-surface hover:border-outline-variant'
-                         }`}
-                       >
-                         {tab.title}
-                       </button>
-                    ))}
-                  </div>
-
-                  <div className="flex-1 overflow-y-auto px-8 py-12 relative flex justify-center pb-32 chat-scrollbar">
-                    <div className="w-full max-w-[760px] bg-surface-container-lowest min-h-[900px] shadow-[0_8px_30px_-4px_rgba(0,0,0,0.08)] shadow-[0_4px_12px_-2px_rgba(0,0,0,0.03)] px-16 py-20 relative group text-[#2d3133] prose prose-sm sm:prose-base max-w-none">
-                      <div className="h-full min-h-[500px]">
-                        {editorTabs.map(tab => (
-                          <div key={tab.id} style={{ display: activeTabId === tab.id ? 'block' : 'none' }} className="w-full h-full">
-                            <TiptapEditor 
-                              content={tab.content} 
-                              onChange={(newContent) => {
-                                setEditorTabs(prev => prev.map(t => t.id === tab.id ? { ...t, content: newContent } : t));
-                              }} 
-                            />
-                          </div>
-                        ))}
+                  <div className="flex-1 overflow-y-auto px-8 py-12 relative flex justify-center pb-32">
+                    <div className="w-full max-w-[760px] bg-surface-container-lowest min-h-[900px] shadow-[0_8px_30px_-4px_rgba(0,0,0,0.08)] shadow-[0_4px_12px_-2px_rgba(0,0,0,0.03)] px-16 py-20 relative group text-[#2d3133]">
+                      <div className="flex flex-col items-center justify-center opacity-50 hover:opacity-100 transition-opacity h-full min-h-[500px]">
+                        {/* Espacio del editor en blanco */}
                       </div>
                     </div>
                   </div>
@@ -531,7 +340,7 @@ export default function LexiaAssistant() {
           <div className="h-14 flex items-center px-stack-md border-b border-outline-variant/20 bg-surface-container-low">
             <div className="w-10 h-10 rounded-full overflow-hidden border border-outline-variant/30 mr-3 shrink-0">
               <img
-                src={isDarkMode ? "/mascota-oscuro.png" : "https://lh3.googleusercontent.com/aida-public/AB6AXuBdKMOoSQ45-xqB_Cf9hAjG79pYqVNrkQo0xpMw0a2clEYC7rxCw-B-3S7yiH9OcrpypudA2k3MWsv8mPnjuo3T7UwX0SmWwsVhFlA75qq-quCQzEm07FI43mUZqz0jP6MVzfw-CcDmeRVATpsITUvserdRufUUS3wSoMnI43lwsOpGFN4MsEWNanNs0Rm4WnTqdp9UhJ3c1S6FIuq7SXrinPmQ6-moBD4jM3XFqRuDU5GD7Io5iJ6rCgPg7c2RFrN3XtA"}
+                src="https://lh3.googleusercontent.com/aida-public/AB6AXuBdKMOoSQ45-xqB_Cf9hAjG79pYqVNrkQo0xpMw0a2clEYC7rxCw-B-3S7yiH9OcrpypudA2k3MWsv8mPnjuo3T7UwX0SmWwsVhFlA75qq-quCQzEm07FI43mUZqz0jP6MVzfw-CcDmeRVATpsITUvserdRufUUS3wSoMnI43lwsOpGFN4MsEWNanNs0Rm4WnTqdp9UhJ3c1S6FIuq7SXrinPmQ6-moBD4jM3XFqRuDU5GD7Io5iJ6rCgPg7c2RFrN3XtA"
                 className="w-full h-full object-cover"
                 alt="AI Mascot"
               />
@@ -558,83 +367,18 @@ export default function LexiaAssistant() {
               ))}
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-stack-md space-y-stack-md flex flex-col chat-scrollbar">
-            {(chatsByModality[modality] || []).length === 0 ? (
-              <div className="bg-surface-container p-stack-sm rounded-lg text-xs text-on-surface-variant border-l-4 border-secondary">
-                {modality === 'ASISTENTE' && '¿Qué documento quieres que creemos?'}
-                {modality === 'ASESORA' && 'Comienza un intake'}
-                {modality === 'AUDITORA' && '¿Qué documento deseas revisar?'}
-              </div>
-            ) : (
-              (chatsByModality[modality] || []).map((msg, idx) => (
-                <div key={idx} className={`p-3 rounded-lg text-sm max-w-[85%] ${msg.role === 'user' ? 'bg-primary text-on-primary self-end whitespace-pre-wrap' : 'bg-surface-container text-on-surface self-start whitespace-pre-wrap'}`}>
-                  {msg.parts[0].text}
-                </div>
-              ))
-            )}
-            {isChatLoading && (
-              <div className="p-3 rounded-lg text-sm max-w-[85%] bg-surface-container text-on-surface self-start animate-pulse">
-                Escribiendo...
-              </div>
-            )}
-            <div ref={chatEndRef} />
+          <div className="flex-1 overflow-y-auto p-stack-md space-y-stack-md">
+            <div className="bg-surface-container p-stack-sm rounded-lg text-xs text-on-surface-variant border-l-4 border-secondary">
+              {t.assistantMessage}
+            </div>
           </div>
           <div className="p-stack-md border-t border-outline-variant/20 bg-surface-container-low">
-            {attachedFiles.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {attachedFiles.map((file, idx) => (
-                  <div key={idx} className="bg-surface-container-high text-xs px-2 py-1 rounded-md flex items-center gap-1 text-on-surface">
-                    <span className="material-symbols-outlined text-[14px]">
-                      {file.type.startsWith('image/') ? 'image' : 'description'}
-                    </span>
-                    <span className="truncate max-w-[150px]">{file.name}</span>
-                    <button 
-                      onClick={() => setAttachedFiles(prev => prev.filter((_, i) => i !== idx))}
-                      className="hover:text-primary transition-colors flex items-center"
-                    >
-                      <span className="material-symbols-outlined text-[14px]">close</span>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
             <div className="relative">
               <textarea
-                className={`w-full bg-surface-container-lowest border border-outline-variant rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-secondary resize-none h-24 ${modality === 'ASESORA' ? 'pl-10 pr-10 py-stack-sm' : 'p-stack-sm'}`}
+                className="w-full bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-sm text-sm focus:outline-none focus:ring-1 focus:ring-secondary resize-none h-24"
                 placeholder={t.askPlaceholder}
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendMessage();
-                  }
-                }}
               ></textarea>
-              {modality === 'ASESORA' && (
-                <div className="absolute left-3 bottom-3">
-                  <button
-                    onClick={() => fileInputRef.current.click()}
-                    className="text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center"
-                    title="Adjuntar archivo o imagen"
-                  >
-                    <span className="material-symbols-outlined">attach_file</span>
-                  </button>
-                  <input
-                    type="file"
-                    multiple
-                    ref={fileInputRef}
-                    style={{ display: 'none' }}
-                    onChange={handleFileChange}
-                    accept="image/*,application/pdf"
-                  />
-                </div>
-              )}
-              <button 
-                onClick={handleSendMessage}
-                disabled={isChatLoading}
-                className="absolute right-2 bottom-2 text-secondary hover:text-on-secondary-container transition-colors disabled:opacity-50"
-              >
+              <button className="absolute right-2 bottom-2 text-secondary hover:text-on-secondary-container transition-colors">
                 <span className="material-symbols-outlined">send</span>
               </button>
             </div>
