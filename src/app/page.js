@@ -130,7 +130,8 @@ export default function LexiaAssistant() {
   const chatEndRef = React.useRef(null);
   const occurrencesCache = React.useRef({});
   const [scrollToLastBlock, setScrollToLastBlock] = React.useState(false);
-  const [correctedErrors, setCorrectedErrors] = React.useState(new Set());
+  const [correctedErrors, setCorrectedErrors] = React.useState({});
+  const [selectedErrorInfo, setSelectedErrorInfo] = React.useState(null);
 
   React.useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -267,20 +268,15 @@ MANDANTE (o la calidad que corresponda)
 - DUI: [números]
 - Dirección: [dirección]
 
-3. RESULTADO DE AUDITORÍA (Solo para hallazgos complejos):
-Analiza el documento en busca de inconsistencias legales, problemas estructurales o riesgos importantes. IMPORTANTE: NO incluyas aquí los errores ortográficos menores, errores de redacción simple o números que deban ser letras (esos se manejan aparte). Tampoco consideres como hallazgos los problemas de concordancia plural/singular, ni los espacios en blanco o líneas "______" (esos espacios están a propósito para que los rellene el consulado). Para cada problema legal o estructural complejo, detállalo exactamente así (mantén las explicaciones MUY breves y directas al grano):
+3. AUDITORÍA Y CORRECCIONES (Oculto):
+Analiza el documento en busca de CUALQUIER tipo de problema: inconsistencias legales, de nombres, DUIs, ortografía, concordancia, o redacción. ES CRÍTICO que verifiques exhaustivamente la homogeneidad de los nombres y números de documento a lo largo de todo el texto.
+IMPORTANTE: Ignora los espacios en blanco o guiones bajos (______), no propongas correcciones para ellos.
 
-Hallazgo [Número] — [Título breve]
-Tipo: [Estructural / Legal / Inconsistencia]
-Sección: [Dónde se encuentra]
-Problema: [Explicación breve y corta del problema]
-Riesgo: [Riesgo breve si no se corrige]
-Corrección propuesta: [Propuesta de corrección concisa]
-Estado: Pendiente de revisión manual.
+No escribas un reporte de texto tradicional. Al puro final de tu respuesta, DEBES agregar las instrucciones de reemplazo de texto exacto para TODOS los hallazgos y errores encontrados, usando EXACTAMENTE este formato por cada problema (usa comillas dobles, no uses Markdown ni cursivas):
+[ERROR: "texto original exacto" -> "texto corregido exacto" | "Explicación muy breve (solo si es un hallazgo complejo o legal)"]
 
-4. CORRECCIONES DIRECTAS (Oculto):
-Al puro final de tu respuesta, DEBES agregar las instrucciones de reemplazo de texto exacto para todos los errores menores (ortografía, concordancia plural/singular, números por letras, formato, etc.) usando EXACTAMENTE este formato por cada error que requiera corrección en el texto (usa comillas dobles, no uses Markdown ni cursivas). IMPORTANTE: Ignora los espacios en blanco o guiones bajos (______), no propongas correcciones para ellos.
-[ERROR: "texto original exacto" -> "texto corregido exacto"]
+Si detectas ambigüedad (ej. dos nombres distintos para la misma persona a lo largo del documento), pon TODAS las variantes incorrectas que encontraste en el "texto original" separadas por " OR ", y las opciones correctas separadas por " OR " en la corrección:
+[ERROR: "Juan Peres" OR "Juán Perez" -> "Juan Pérez" OR "Juan Peres" | "Inconsistencia: El nombre difiere."]
 
 Finalmente, pregúntame si deseo anexar más archivos (DUI u otros) para revisión cruzada.`;
         handleSendMessage([fileData], customInstruction, `[Documento cargado: ${fileName}]`);
@@ -340,44 +336,148 @@ Finalmente, pregúntame si deseo anexar más archivos (DUI u otros) para revisi�
   };
 
   const handleCorrectError = (originalText, correctedText, index = 0, errorKey) => {
+    const originalOptions = originalText.split(/\s*"?\s+OR\s+"?\s*/i).map(s => s.replace(/(^"|"$)/g, '').trim());
+    const isGlobal = originalOptions.length > 1;
+    const safeKey = errorKey.replace(/[^a-zA-Z0-9-]/g, '-');
+    
+    let appliedData = { type: isGlobal ? 'global' : 'single', chosen: correctedText, originals: [] };
+
     setEditorTabs(prevTabs => {
       return prevTabs.map(tab => {
         if (tab.id === activeTabId) {
           let newContent = tab.content;
-          const replacementHtml = `<strong><span style="color: #16a34a">${correctedText}</span></strong>`;
-          const highlightRegex = new RegExp(`<mark[^>]*>${escapeRegExp(originalText)}</mark>`, 'gi');
-          if (newContent.match(highlightRegex)) {
-            newContent = newContent.replace(highlightRegex, replacementHtml);
+          
+          if (isGlobal) {
+            let replaceCount = 0;
+            originalOptions.forEach(opt => {
+              const highlightRegex = new RegExp(`<mark[^>]*>${escapeRegExp(opt)}</mark>`, 'gi');
+              newContent = newContent.replace(highlightRegex, opt);
+              
+              const regex = new RegExp(`(?<=^|\\W)${escapeRegExp(opt)}(?=\\W|$)`, 'gi');
+              newContent = newContent.replace(regex, (match) => {
+                 appliedData.originals.push({ text: match });
+                 const rep = `<strong id="error-${safeKey}-${replaceCount}"><span style="color: #16a34a">${correctedText}</span></strong>`;
+                 replaceCount++;
+                 return rep;
+              });
+            });
           } else {
-            const regex = new RegExp(`\\b${escapeRegExp(originalText)}\\b`, 'i');
-            newContent = replaceNthOccurrence(newContent, regex, replacementHtml, index);
+             const replacementHtml = `<strong id="error-${safeKey}"><span style="color: #16a34a">${correctedText}</span></strong>`;
+             appliedData.originals.push({ text: originalText });
+             
+             const highlightRegex = new RegExp(`<mark[^>]*>${escapeRegExp(originalText)}</mark>`, 'gi');
+             if (newContent.match(highlightRegex)) {
+               newContent = newContent.replace(highlightRegex, replacementHtml);
+             } else {
+               const regex = new RegExp(`(?<=^|\\W)${escapeRegExp(originalText)}(?=\\W|$)`, 'i');
+               newContent = replaceNthOccurrence(newContent, regex, replacementHtml, index);
+             }
           }
           return { ...tab, content: newContent };
         }
         return tab;
       });
     });
-    setCorrectedErrors(prev => new Set(prev).add(errorKey));
+    setCorrectedErrors(prev => ({ ...prev, [errorKey]: appliedData }));
+    if (selectedErrorInfo?.errorKey === errorKey) {
+      setSelectedErrorInfo(null);
+    }
   };
 
-  const handleHoverError = (originalText, isHovering, index = 0) => {
+  const handleUndoError = (originalText, errorKey) => {
+    const appliedData = correctedErrors[errorKey];
+    if (!appliedData) return;
+
     setEditorTabs(prevTabs => {
       return prevTabs.map(tab => {
         if (tab.id === activeTabId) {
           let newContent = tab.content;
-          const highlightRegex = new RegExp(`<mark[^>]*>${escapeRegExp(originalText)}</mark>`, 'gi');
           
-          if (isHovering && !newContent.match(highlightRegex)) {
-            const regex = new RegExp(`\\b${escapeRegExp(originalText)}\\b`, 'i');
-            newContent = replaceNthOccurrence(newContent, regex, `<mark>${originalText}</mark>`, index);
-            setTimeout(() => {
-              const mark = document.querySelector('.ProseMirror mark');
-              if (mark) {
-                mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              }
-            }, 150); // Increased timeout to ensure Tiptap has updated the DOM
-          } else if (!isHovering && newContent.match(highlightRegex)) {
-            newContent = newContent.replace(highlightRegex, originalText);
+          if (appliedData.type === 'global') {
+             appliedData.originals.forEach(orig => {
+               const regex = new RegExp(`(?:<[^>]+>)+${escapeRegExp(appliedData.chosen)}(?:<\\/[^>]+>)+`, 'i');
+               if (newContent.match(regex)) {
+                 newContent = newContent.replace(regex, orig.text);
+               } else {
+                 const plainRegex = new RegExp(`(?<=^|\\W)${escapeRegExp(appliedData.chosen)}(?=\\W|$)`, 'i');
+                 newContent = newContent.replace(plainRegex, orig.text);
+               }
+             });
+          } else {
+            const appliedText = appliedData.chosen;
+            const regex = new RegExp(`(?:<[^>]+>)+${escapeRegExp(appliedText)}(?:<\\/[^>]+>)+`, 'i');
+            if (newContent.match(regex)) {
+              newContent = newContent.replace(regex, appliedData.originals[0].text);
+            } else {
+              const plainRegex = new RegExp(`(?<=^|\\W)${escapeRegExp(appliedText)}(?=\\W|$)`, 'i');
+              newContent = newContent.replace(plainRegex, appliedData.originals[0].text);
+            }
+          }
+          
+          return { ...tab, content: newContent };
+        }
+        return tab;
+      });
+    });
+    setCorrectedErrors(prev => {
+      const newObj = { ...prev };
+      delete newObj[errorKey];
+      return newObj;
+    });
+  };
+
+  const handleSelectError = (originalText, index, errorKey) => {
+    if (selectedErrorInfo?.errorKey === errorKey) {
+      setSelectedErrorInfo(null);
+      handleHoverError(originalText, false, index);
+      return;
+    }
+    
+    if (selectedErrorInfo) {
+      handleHoverError(selectedErrorInfo.originalText, false, selectedErrorInfo.index);
+    }
+    
+    setSelectedErrorInfo({ originalText, index, errorKey });
+    handleHoverError(originalText, true, index);
+  };
+
+  const handleHoverError = (originalText, isHovering, index = 0) => {
+    const originalOptions = originalText.split(/\s*"?\s+OR\s+"?\s*/i).map(s => s.replace(/(^"|"$)/g, '').trim());
+    const isGlobal = originalOptions.length > 1;
+
+    setEditorTabs(prevTabs => {
+      return prevTabs.map(tab => {
+        if (tab.id === activeTabId) {
+          let newContent = tab.content;
+          
+          if (isGlobal) {
+            originalOptions.forEach(opt => {
+               const highlightRegex = new RegExp(`<mark[^>]*>${escapeRegExp(opt)}</mark>`, 'gi');
+               if (isHovering && !newContent.match(highlightRegex)) {
+                 const regex = new RegExp(`(?<=^|\\W)${escapeRegExp(opt)}(?=\\W|$)`, 'gi');
+                 newContent = newContent.replace(regex, `<mark>${opt}</mark>`);
+               } else if (!isHovering && newContent.match(highlightRegex)) {
+                 newContent = newContent.replace(highlightRegex, opt);
+               }
+            });
+            if (isHovering) {
+               setTimeout(() => {
+                 const mark = document.querySelector('.ProseMirror mark');
+                 if (mark) mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+               }, 150);
+            }
+          } else {
+             const highlightRegex = new RegExp(`<mark[^>]*>${escapeRegExp(originalText)}</mark>`, 'gi');
+             if (isHovering && !newContent.match(highlightRegex)) {
+               const regex = new RegExp(`(?<=^|\\W)${escapeRegExp(originalText)}(?=\\W|$)`, 'i');
+               newContent = replaceNthOccurrence(newContent, regex, `<mark>${originalText}</mark>`, index);
+               setTimeout(() => {
+                 const mark = document.querySelector('.ProseMirror mark');
+                 if (mark) mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+               }, 150);
+             } else if (!isHovering && newContent.match(highlightRegex)) {
+               newContent = newContent.replace(highlightRegex, originalText);
+             }
           }
           return { ...tab, content: newContent };
         }
@@ -388,7 +488,7 @@ Finalmente, pregúntame si deseo anexar más archivos (DUI u otros) para revisi�
 
   const renderChatMessage = (text, role) => {
     if (role === 'user') return text;
-    const errorRegex = /\[ERROR:\s*"([^"]+)"\s*->\s*"([^"]+)"\]/g;
+    const errorRegex = /\[ERROR:\s*(.+?)\s*->\s*([^|\]]+?)(?:\s*\|\s*"([^"]+)")?\s*\]/g;
     
     if (!text.match(errorRegex)) return text;
     
@@ -396,54 +496,85 @@ Finalmente, pregúntame si deseo anexar más archivos (DUI u otros) para revisi�
     let lastIndex = 0;
     let match;
     
-    const regex = /\[ERROR:\s*"([^"]+)"\s*->\s*"([^"]+)"\]/g;
+    const regex = /\[ERROR:\s*(.+?)\s*->\s*([^|\]]+?)(?:\s*\|\s*"([^"]+)")?\s*\]/g;
     while ((match = regex.exec(text)) !== null) {
       if (match.index > lastIndex) {
         parts.push(text.substring(lastIndex, match.index));
       }
-      const originalText = match[1];
-      const correctedText = match[2];
+      const originalTextRaw = match[1].trim();
+      const correctedTextRaw = match[2].trim();
+      const explanationText = match[3];
+      
+      const originalOptions = originalTextRaw.split(/\s*"?\s+OR\s+"?\s*/i).map(s => s.replace(/(^"|"$)/g, '').trim());
+      const originalText = originalOptions.length === 1 ? originalOptions[0] : originalTextRaw;
+      const isGlobal = originalOptions.length > 1;
       
       // Calculate how many times it appears in the text and cache it to prevent UI shifting
       const activeTab = editorTabs.find(t => t.id === activeTabId);
       const textContentStr = activeTab ? activeTab.content : '';
-      const textMatches = textContentStr.match(new RegExp(`\\b${escapeRegExp(originalText)}\\b`, 'gi'));
-      const currentCount = textMatches ? textMatches.length : 1;
+      
+      let currentCount = 1;
+      if (!isGlobal) {
+        const textMatches = textContentStr.match(new RegExp(`(?<=^|\\W)${escapeRegExp(originalText)}(?=\\W|$)`, 'gi'));
+        currentCount = textMatches ? textMatches.length : 1;
+      }
       
       const cacheKey = `${match.index}-${originalText}`;
       if (!occurrencesCache.current[cacheKey] || occurrencesCache.current[cacheKey] < currentCount) {
         occurrencesCache.current[cacheKey] = currentCount;
       }
-      const occurrencesCount = occurrencesCache.current[cacheKey];
+      const occurrencesCount = isGlobal ? 1 : occurrencesCache.current[cacheKey];
       
       for (let i = 0; i < occurrencesCount; i++) {
         const errorKey = `${match.index}-${i}`;
-        const isCorrected = correctedErrors.has(errorKey);
+        const isCorrected = !!correctedErrors[errorKey];
+        const isSevere = !!explanationText;
+        const correctionOptions = correctedTextRaw.split(/\s*"?\s+OR\s+"?\s*/i).map(s => s.replace(/(^"|"$)/g, '').trim());
+        const correctedText = correctionOptions.length === 1 ? correctionOptions[0] : correctionOptions.join(' o ');
         
         parts.push(
           <div 
             key={errorKey} 
-            className="my-2 p-2 border border-secondary/30 bg-surface-container-low rounded-lg shadow-sm flex flex-col gap-2 transition-all hover:border-secondary"
-            onMouseEnter={() => { if (!isCorrected) handleHoverError(originalText, true, i); }}
-            onMouseLeave={() => { if (!isCorrected) handleHoverError(originalText, false, i); }}
+            className={`my-2 p-2 border ${isSevere ? 'border-red-400 bg-red-50/50' : 'border-secondary/30 bg-surface-container-low'} ${selectedErrorInfo?.errorKey === errorKey ? 'ring-2 ring-primary shadow-md' : 'shadow-sm'} rounded-lg flex flex-col gap-2 transition-all hover:border-primary cursor-pointer`}
+            onClick={() => { if (!isCorrected) handleSelectError(originalText, i, errorKey); }}
+            onMouseEnter={() => { if (!isCorrected && selectedErrorInfo?.errorKey !== errorKey) handleHoverError(originalText, true, i); }}
+            onMouseLeave={() => { if (!isCorrected && selectedErrorInfo?.errorKey !== errorKey) handleHoverError(originalText, false, i); }}
           >
-            <div className="text-xs">
-              <span className="line-through text-error mr-2">{originalText}</span>
-              <span className="text-primary font-bold">→ {correctedText}</span>
-              {occurrencesCount > 1 && <span className="ml-2 text-on-surface-variant italic">(Coincidencia {i + 1})</span>}
+            <div className="text-xs pointer-events-none flex flex-col gap-1">
+              <div>
+                <span className="line-through text-error mr-2">{originalText}</span>
+                {isSevere && correctionOptions.length > 1 ? (
+                   <span className="text-primary font-bold">→ Múltiples opciones</span>
+                ) : (
+                   <span className="text-primary font-bold">→ {correctedText}</span>
+                )}
+                {occurrencesCount > 1 && <span className="ml-2 text-on-surface-variant italic">(Coincidencia {i + 1})</span>}
+              </div>
+              {isSevere && (
+                <div className={`text-[11px] ${isSevere ? 'text-red-700' : 'text-on-surface-variant'} italic border-t ${isSevere ? 'border-red-200' : 'border-outline-variant/20'} pt-1 mt-1`}>
+                  💡 {explanationText}
+                </div>
+              )}
             </div>
             {isCorrected ? (
-              <div className="self-start text-[11px] text-green-600 font-bold px-2 py-1 flex items-center gap-1">
-                <span className="material-symbols-outlined text-[14px]">check_circle</span>
-                Corregido
+              <div className="self-start text-[11px] text-green-600 font-bold px-2 py-1 flex items-center gap-2">
+                <span className="flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">check_circle</span> Corregido</span>
+                <button onClick={(e) => { e.stopPropagation(); handleUndoError(originalText, errorKey); }} className="text-on-surface-variant hover:text-red-500 font-normal flex items-center ml-2 border border-outline-variant/30 px-2 rounded bg-surface transition-colors pointer-events-auto">
+                  <span className="material-symbols-outlined text-[12px] mr-1">undo</span> Deshacer
+                </button>
               </div>
             ) : (
-              <button
-                onClick={() => handleCorrectError(originalText, correctedText, i, errorKey)}
-                className="self-start text-[11px] bg-secondary text-on-secondary px-2 py-1 rounded hover:bg-secondary/90 transition-colors"
-              >
-                Corregir
-              </button>
+              <div className="flex flex-wrap gap-2 mt-1">
+                {correctionOptions.map((opt, optIdx) => (
+                  <button
+                    key={optIdx}
+                    onClick={(e) => { e.stopPropagation(); handleCorrectError(originalText, opt, i, errorKey); }}
+                    className="self-start text-[11px] bg-secondary text-on-secondary px-2 py-1 rounded hover:bg-secondary/90 transition-colors pointer-events-auto"
+                  >
+                    {correctionOptions.length > 1 ? `Elegir: ${opt}` : 'Corregir'}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
         );
@@ -895,75 +1026,76 @@ Finalmente, pregúntame si deseo anexar más archivos (DUI u otros) para revisi�
             )}
             <div ref={chatEndRef} />
           </div>
-          <div className="p-stack-md border-t border-outline-variant/20 bg-surface-container-low">
-            {attachedFiles.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {attachedFiles.map((file, idx) => (
-                  <div key={idx} className="bg-surface-container-high text-xs px-2 py-1 rounded-md flex items-center gap-1 text-on-surface">
-                    <span className="material-symbols-outlined text-[14px]">
-                      {file.type.startsWith('image/') ? 'image' : 'description'}
-                    </span>
-                    <span className="truncate max-w-[150px]">{file.name}</span>
-                    <button 
-                      onClick={() => setAttachedFiles(prev => prev.filter((_, i) => i !== idx))}
-                      className="hover:text-primary transition-colors flex items-center"
-                    >
-                      <span className="material-symbols-outlined text-[14px]">close</span>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="relative">
-              <textarea
-                className={`w-full bg-surface-container-lowest border border-outline-variant rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-secondary resize-none h-24 ${modality === 'ASESORA' ? 'pl-10 pr-10 py-stack-sm' : 'p-stack-sm'} ${modality === 'AUDITORA' ? 'opacity-50 cursor-not-allowed bg-surface-container' : ''}`}
-                placeholder={modality === 'AUDITORA' ? "Chat deshabilitado (Use el botón 'Añadir documento' arriba)" : t.askPlaceholder}
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                disabled={modality === 'AUDITORA'}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendMessage();
-                  }
-                }}
-              ></textarea>
-              {modality === 'ASESORA' && (
-                <div className="absolute left-3 bottom-3">
-                  <button
-                    onClick={() => fileInputRef.current.click()}
-                    className="text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center"
-                    title="Adjuntar archivo o imagen"
-                  >
-                    <span className="material-symbols-outlined">attach_file</span>
-                  </button>
-                  <input
-                    type="file"
-                    multiple
-                    ref={fileInputRef}
-                    style={{ display: 'none' }}
-                    onChange={handleFileChange}
-                    accept="image/*,application/pdf"
-                  />
+          <input
+            type="file"
+            multiple
+            ref={fileInputRefAuditora}
+            style={{ display: 'none' }}
+            onChange={handleAuditoraFileChange}
+            accept="application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+          />
+          {modality !== 'AUDITORA' && (
+            <div className="p-stack-md border-t border-outline-variant/20 bg-surface-container-low">
+              {attachedFiles.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {attachedFiles.map((file, idx) => (
+                    <div key={idx} className="bg-surface-container-high text-xs px-2 py-1 rounded-md flex items-center gap-1 text-on-surface">
+                      <span className="material-symbols-outlined text-[14px]">
+                        {file.type.startsWith('image/') ? 'image' : 'description'}
+                      </span>
+                      <span className="truncate max-w-[150px]">{file.name}</span>
+                      <button 
+                        onClick={() => setAttachedFiles(prev => prev.filter((_, i) => i !== idx))}
+                        className="hover:text-primary transition-colors flex items-center"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">close</span>
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
-              <input
-                type="file"
-                multiple
-                ref={fileInputRefAuditora}
-                style={{ display: 'none' }}
-                onChange={handleAuditoraFileChange}
-                accept="application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
-              />
-              <button 
-                onClick={handleSendMessage}
-                disabled={isChatLoading || modality === 'AUDITORA'}
-                className="absolute right-2 bottom-2 text-secondary hover:text-on-secondary-container transition-colors disabled:opacity-50"
-              >
-                <span className="material-symbols-outlined">send</span>
-              </button>
+              <div className="relative">
+                <textarea
+                  className={`w-full bg-surface-container-lowest border border-outline-variant rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-secondary resize-none h-24 ${modality === 'ASESORA' ? 'pl-10 pr-10 py-stack-sm' : 'p-stack-sm'}`}
+                  placeholder={t.askPlaceholder}
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage();
+                    }
+                  }}
+                ></textarea>
+                {modality === 'ASESORA' && (
+                  <div className="absolute left-3 bottom-3">
+                    <button
+                      onClick={() => fileInputRef.current.click()}
+                      className="text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center"
+                      title="Adjuntar archivo o imagen"
+                    >
+                      <span className="material-symbols-outlined">attach_file</span>
+                    </button>
+                    <input
+                      type="file"
+                      multiple
+                      ref={fileInputRef}
+                      style={{ display: 'none' }}
+                      onChange={handleFileChange}
+                      accept="image/*,application/pdf"
+                    />
+                  </div>
+                )}
+                <button 
+                  onClick={handleSendMessage}
+                  disabled={isChatLoading}
+                  className="absolute right-2 bottom-2 text-secondary hover:text-on-secondary-container transition-colors disabled:opacity-50"
+                >
+                  <span className="material-symbols-outlined">send</span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </aside>
       </div>
