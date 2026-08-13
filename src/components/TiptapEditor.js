@@ -9,7 +9,7 @@ const TiptapEditor = ({ content, onChange }) => {
   const editor = useEditor({
     extensions: [
       StarterKit,
-      Highlight.configure({ HTMLAttributes: { class: 'bg-yellow-200' } }),
+      Highlight.configure({ HTMLAttributes: { class: 'bg-yellow-200 text-black dark:text-black' } }),
       TextStyle,
       Color
     ],
@@ -21,7 +21,7 @@ const TiptapEditor = ({ content, onChange }) => {
     },
     editorProps: {
       attributes: {
-        class: 'prose prose-sm sm:prose-base focus:outline-none max-w-none w-full min-h-[500px] text-justify',
+        class: 'prose dark:prose-invert prose-sm sm:prose-base focus:outline-none max-w-none w-full min-h-[500px] text-justify',
       },
     },
   });

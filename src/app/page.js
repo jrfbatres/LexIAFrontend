@@ -568,19 +568,196 @@ export default function LexiaAssistant() {
     setChatsByModality(prev => ({ ...prev, [modality]: [] }));
   };
 
-  const handleSaveDocument = () => {
+  const handleSaveDocx = () => {
     const activeTab = editorTabs.find(t => t.id === activeTabId);
     if (!activeTab || !activeTab.content) return;
     
     const htmlContent = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"></head><body style="text-align: justify; font-family: sans-serif;">${activeTab.content}</body></html>`;
 
-    const blob = new Blob([htmlContent], { type: 'application/msword' });
+    const blob = new Blob([htmlContent], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${activeTab.title || 'documento'}.doc`;
+    a.download = `${activeTab.title || 'documento'}.docx`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleSavePdf = () => {
+    const activeTab = editorTabs.find(t => t.id === activeTabId);
+    if (!activeTab || !activeTab.content) return;
+    
+    const isAsesoria = activeTab.id.startsWith('asesoria_');
+    const logoUrl = window.location.origin + "/logo.png";
+    
+    let headerContent = '';
+    let footerContent = '';
+    
+    if (isAsesoria) {
+      headerContent = `
+        <div class="cover-first-header"></div>
+        <div style="text-align: center; margin-bottom: 20px;">
+          <img src="${logoUrl}" alt="LexIA" style="max-height: 80px;" />
+          <h2 style="margin-top: 10px; color: #333; font-family: Arial, sans-serif;">Asesoría Jurídica Preliminar</h2>
+        </div>
+      `;
+      footerContent = `
+        <div id="fixed-header">
+          <img src="${logoUrl}" alt="LexIA" style="max-height: 35px;" />
+        </div>
+        <div id="footer">
+          <div style="padding-top: 10px; border-top: 1px solid #ccc; font-size: 9pt; color: #555; text-align: justify; font-family: Arial, sans-serif; line-height: 1.4;">
+            <strong>Aviso Legal:</strong> La información contenida en el presente documento es de carácter orientativo e informativo, generada por un sistema de inteligencia artificial. Esta asesoría <strong>no sustituye el consejo legal profesional</strong>. Recomendamos encarecidamente que este documento y la situación descrita sean revisados y verificados por un abogado calificado antes de tomar cualquier decisión o acción legal.
+          </div>
+        </div>
+      `;
+    }
+    
+    const htmlContent = `<!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>${activeTab.title || 'documento'}</title>
+          <style>
+            @media print {
+              @page { margin: 0; } /* margin: 0 oculta la fecha, url y titulo automático del navegador */
+              body { 
+                font-family: Arial, sans-serif; 
+                text-align: justify; 
+                font-size: 11pt; 
+                margin: 0;
+                line-height: 1.5;
+                background-color: white;
+                color: black;
+              }
+              .main-table { width: 100%; border-collapse: collapse; border: none; }
+              .main-table td { padding: 0; border: none; }
+              .header-space {
+                height: 2.5cm;
+              }
+              .footer-space {
+                height: ${isAsesoria ? '6cm' : '2.5cm'};
+              }
+              .content-wrapper {
+                padding-left: 2.5cm;
+                padding-right: 2.5cm;
+              }
+              .content-wrapper, .content-wrapper * {
+                white-space: pre-wrap !important;
+                word-wrap: break-word !important;
+                overflow-wrap: break-word !important;
+                font-family: Arial, sans-serif !important;
+                text-align: justify !important;
+                max-width: 100% !important;
+              }
+              .cover-first-header {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 2.5cm;
+                background-color: white;
+                z-index: 50; /* Cubre el fixed-header (z-index: 1) en la primera página */
+              }
+              #fixed-header {
+                position: fixed;
+                top: 1cm;
+                left: 2.5cm;
+                right: 2.5cm;
+                border-bottom: 2px solid #003366; /* Línea de membrete */
+                padding-bottom: 5px;
+                z-index: 1; /* Estará por debajo del cover de la primera página */
+              }
+              #footer {
+                position: fixed;
+                bottom: 2.5cm;
+                left: 2.5cm;
+                right: 2.5cm;
+                width: auto;
+                background-color: white;
+              }
+            }
+            @media screen {
+              body { 
+                font-family: Arial, sans-serif; 
+                text-align: justify; 
+                font-size: 11pt; 
+                line-height: 1.5;
+                padding: 0;
+                margin: 0;
+                background: white;
+                color: black;
+              }
+              .main-table { width: 100%; border-collapse: collapse; border: none; }
+              .main-table td { padding: 0; border: none; }
+              .header-space { height: 2.5cm; }
+              .footer-space { height: 2.5cm; }
+              .content-wrapper {
+                padding-left: 2.5cm;
+                padding-right: 2.5cm;
+              }
+              .content-wrapper, .content-wrapper * {
+                white-space: pre-wrap !important;
+                word-wrap: break-word !important;
+                overflow-wrap: break-word !important;
+                font-family: Arial, sans-serif !important;
+                text-align: justify !important;
+                max-width: 100% !important;
+              }
+              html { background: white; }
+              #fixed-header { display: none; }
+              #footer {
+                margin-left: 2.5cm;
+                margin-right: 2.5cm;
+                margin-top: 40px;
+                padding-top: 20px;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <table class="main-table">
+            <thead><tr><td><div class="header-space"></div></td></tr></thead>
+            <tbody><tr><td>
+              <div class="content-wrapper">
+                ${headerContent}
+                ${activeTab.content}
+              </div>
+            </td></tr></tbody>
+            <tfoot><tr><td>
+              <div class="footer-space"></div>
+            </td></tr></tfoot>
+          </table>
+          ${footerContent}
+          <script>
+            window.onload = () => {
+              setTimeout(() => {
+                window.print();
+              }, 500);
+            }
+          </script>
+        </body>
+      </html>
+    `;
+    
+    try {
+      const blob = new Blob([htmlContent], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const printWindow = window.open(url, '_blank', 'noopener,noreferrer');
+      
+      if (!printWindow) {
+        alert("Por favor permite las ventanas emergentes (pop-ups) para ver el PDF.");
+      }
+    } catch (error) {
+      console.error("Error al generar PDF:", error);
+      // Fallback
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.open();
+        printWindow.document.write(htmlContent);
+        printWindow.document.close();
+      }
+    }
   };
 
   const handleCloseTab = (e, tabId) => {
@@ -859,7 +1036,7 @@ export default function LexiaAssistant() {
         parts.push(
           <div 
             key={errorKey} 
-            className={`my-2 p-2 border ${isSevere ? 'border-red-400 bg-red-50/50' : 'border-secondary/30 bg-surface-container-low'} ${selectedErrorInfo?.errorKey === errorKey ? 'ring-2 ring-primary shadow-md' : 'shadow-sm'} rounded-lg flex flex-col gap-2 transition-all hover:border-primary cursor-pointer`}
+            className={`my-2 p-2 border ${isSevere ? 'border-error/50 bg-error-container/20' : 'border-secondary/30 bg-surface-container-low'} ${selectedErrorInfo?.errorKey === errorKey ? 'ring-2 ring-primary shadow-md' : 'shadow-sm'} rounded-lg flex flex-col gap-2 transition-all hover:border-primary cursor-pointer`}
             onClick={() => { if (!isCorrected) handleSelectError(originalText, i, errorKey); }}
             onMouseEnter={() => { if (!isCorrected && selectedErrorInfo?.errorKey !== errorKey) handleHoverError(originalText, true, i); }}
             onMouseLeave={() => { if (!isCorrected && selectedErrorInfo?.errorKey !== errorKey) handleHoverError(originalText, false, i); }}
@@ -875,7 +1052,7 @@ export default function LexiaAssistant() {
                 {occurrencesCount > 1 && <span className="ml-2 text-on-surface-variant italic">(Coincidencia {i + 1})</span>}
               </div>
               {isSevere && (
-                <div className={`text-[11px] ${isSevere ? 'text-red-700' : 'text-on-surface-variant'} italic border-t ${isSevere ? 'border-red-200' : 'border-outline-variant/20'} pt-1 mt-1`}>
+                <div className={`text-[11px] ${isSevere ? 'text-error' : 'text-on-surface-variant'} italic border-t ${isSevere ? 'border-error/30' : 'border-outline-variant/20'} pt-1 mt-1`}>
                   💡 {explanationText}
                 </div>
               )}
@@ -942,7 +1119,7 @@ export default function LexiaAssistant() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           message: newMessage,
-          history: currentMessages,
+          history: currentMessages.map(msg => ({ role: msg.role, parts: msg.parts })),
           modality: modality,
           files: filesToUse
         })
@@ -1249,11 +1426,17 @@ export default function LexiaAssistant() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button onClick={handleSaveDocument} className="h-8 px-3 rounded-lg bg-[#2B579A] text-white hover:bg-[#1E3E6D] transition-colors flex items-center gap-1.5 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
-                        <span className="material-symbols-outlined text-[16px]">
-                          save
+                      {!activeTabId?.startsWith('asesoria_') && (
+                        <button onClick={handleSaveDocx} title="DOCX" className="h-8 w-10 flex justify-center items-center rounded-lg bg-[#2B579A] text-white hover:bg-[#1E3E6D] transition-colors shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
+                          <span className="material-symbols-outlined text-[18px]">
+                            description
+                          </span>
+                        </button>
+                      )}
+                      <button onClick={handleSavePdf} title="PDF" className="h-8 w-10 flex justify-center items-center rounded-lg bg-[#D32F2F] text-white hover:bg-[#B71C1C] transition-colors shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
+                        <span className="material-symbols-outlined text-[18px]">
+                          picture_as_pdf
                         </span>
-                        <span className="text-[13px] font-medium">{t.saveBtn}</span>
                       </button>
                     </div>
                   </div>
