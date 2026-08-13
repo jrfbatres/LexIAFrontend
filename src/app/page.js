@@ -554,27 +554,7 @@ export default function LexiaAssistant() {
           }
         });
 
-        const customInstruction = `Analiza el documento adjunto y presenta el resultado de la siguiente manera estructurada:
-
-1. TIPO DE DOCUMENTO: Usa la etiqueta exacta [TIPO_DOCUMENTO: Nombre del tipo de documento].
-2. PARTICIPANTES: Lista cada participante usando la siguiente sintaxis exacta por cada uno (usa corchetes y barras verticales, sin saltos de línea dentro del tag). IMPORTANTE: Si es persona jurídica, pon la info del representante legal, pero menciona el nombre de la empresa en el rol. Para el DUI extrae ÚNICAMENTE el formato numérico (ej. 12345678-9). Si el participante es el Notario, pon N/A en el DUI.
-[PARTICIPANTE: Rol del participante | Nombre completo | Número de DUI (solo números, o N/A) | Dirección completa | Profesión o Estado (si aplica, sino N/A)]
-
-3. BIENES: Si el documento menciona bienes muebles o inmuebles, lístalos. Por cada bien usa la siguiente sintaxis exacta (usa corchetes y barras verticales, sin saltos de línea dentro del tag):
-[BIEN: Tipo de Bien | Atributo 1: Valor 1 ; Atributo 2: Valor 2 ; Atributo 3: Valor 3 ...]
-Extrae TODOS los datos descriptivos y registrales que aparezcan en el documento para ese bien y sepáralos por un punto y coma (;). Por ejemplo, si es vehículo, incluye marca, modelo, año, color, placa, VIN, número de motor, capacidad, etc. Si es inmueble: extensión, ubicación, linderos, matrícula, valor, etc.
-
-4. AUDITORÍA Y CORRECCIONES (Oculto):
-Analiza el documento en busca de CUALQUIER tipo de problema: inconsistencias legales, de nombres, DUIs, ortografía, concordancia, o redacción. ES CRÍTICO que verifiques exhaustivamente la homogeneidad de los nombres y números de documento a lo largo de todo el texto.
-IMPORTANTE: Ignora los espacios en blanco o guiones bajos (______), no propongas correcciones para ellos.
-
-No escribas un reporte de texto tradicional. Al puro final de tu respuesta, DEBES agregar las instrucciones de reemplazo de texto exacto para TODOS los hallazgos y errores encontrados, usando EXACTAMENTE este formato por cada problema (usa comillas dobles, no uses Markdown ni cursivas):
-[ERROR: "texto original exacto" -> "texto corregido exacto" | "Explicación muy breve (solo si es un hallazgo complejo o legal)"]
-
-Si detectas ambigüedad (ej. dos nombres distintos para la misma persona a lo largo del documento), pon TODAS las variantes incorrectas que encontraste en el "texto original" separadas por " OR ", y las opciones correctas separadas por " OR " en la corrección:
-[ERROR: "Juan Peres" OR "Juán Perez" -> "Juan Pérez" OR "Juan Peres" | "Inconsistencia: El nombre difiere."]
-
-Finalmente, pregúntame si deseo anexar más archivos (DUI u otros) para revisión cruzada.`;
+        const customInstruction = "Por favor, analiza este documento e identifica el tipo de documento, participantes, bienes y posibles errores siguiendo las instrucciones del sistema.";
         handleSendMessage([fileData], customInstruction, `[Documento cargado: ${fileName}]`);
       } catch (err) {
         console.error("Error al extraer texto:", err);
