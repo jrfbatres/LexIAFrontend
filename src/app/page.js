@@ -47,6 +47,22 @@ const translations = {
     reviewBtnDesc: "Analizar documentos subidos",
     langEs: "Español (ES)",
     langEn: "English (EN)",
+    userMenu: "Usuario",
+    login: "Iniciar Sesión",
+    logout: "Cerrar Sesión",
+    saveBtn: "Guardar",
+    asistenteLabel: "ASISTENTE",
+    asesoraLabel: "ASESORA",
+    auditoraLabel: "AUDITORA",
+    asistenteMsg: "¿Qué documento quieres que creemos?",
+    asesoraMsg: "Hola, soy LexIA tu asesora legal. ¿En qué puedo ayudarle ahora?",
+    auditoraMsg: "¿Qué documento desea analizar?",
+    addDocBtn: "Añadir documento",
+    loginTitle: "Iniciar Sesión",
+    usernamePlaceholder: "Usuario (ID)",
+    passwordPlaceholder: "Contraseña",
+    enterBtn: "Entrar",
+    cancelBtn: "Cancelar",
   },
   EN: {
     newChat: "NEW CHAT",
@@ -91,11 +107,260 @@ const translations = {
     reviewBtnDesc: "Analyze uploaded documents",
     langEs: "Español (ES)",
     langEn: "English (EN)",
+    userMenu: "User",
+    login: "Login",
+    logout: "Logout",
+    saveBtn: "Save",
+    asistenteLabel: "ASSISTANT",
+    asesoraLabel: "ADVISOR",
+    auditoraLabel: "AUDITOR",
+    asistenteMsg: "What document do you want us to create?",
+    asesoraMsg: "Hello, I am LexIA your legal advisor. How can I help you now?",
+    auditoraMsg: "What document do you wish to analyze?",
+    addDocBtn: "Add document",
+    loginTitle: "Login",
+    usernamePlaceholder: "Username (ID)",
+    passwordPlaceholder: "Password",
+    enterBtn: "Enter",
+    cancelBtn: "Cancel",
   }
+};
+
+const ParticipantBlock = ({ participant }) => {
+  const [uploading, setUploading] = React.useState(false);
+  const [result, setResult] = React.useState(null);
+  const [frente, setFrente] = React.useState(null);
+  const [vuelto, setVuelto] = React.useState(null);
+  
+  const fileInputRefFrente = React.useRef(null);
+  const fileInputRefVuelto = React.useRef(null);
+  
+  const isNotario = participant.rol.toLowerCase().includes('notario');
+
+  const handleFileChange = (e, setFileFn) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFileFn({
+          name: file.name,
+          type: file.type,
+          base64: reader.result.split(',')[1]
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  React.useEffect(() => {
+    const validate = async () => {
+      setUploading(true);
+      const prompt = `Por favor valida la siguiente información del participante contra las imágenes del DUI (frente y vuelto) adjuntas:\nRol: ${participant.rol}\nNombre: ${participant.nombre}\nDUI: ${participant.dui}\nDirección: ${participant.direccion}\nProfesión/Estado: ${participant.profesion}\n\nIndica si los datos coinciden o si hay discrepancias.`;
+      
+      try {
+        const response = await fetch("http://localhost:3001/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            message: prompt,
+            history: [],
+            modality: "AUDITORA",
+            files: [frente, vuelto]
+          })
+        });
+        const data = await response.json();
+        if (data.response) {
+          setResult(data.response);
+        } else {
+          setResult("Error en la validación.");
+        }
+      } catch (err) {
+        setResult("Error de red al validar.");
+      } finally {
+        setUploading(false);
+      }
+    };
+
+    if (frente && vuelto && !result && !uploading) {
+      validate();
+    }
+  }, [frente, vuelto, result, uploading, participant]);
+
+  return (
+    <div className="my-2 p-3 border border-green-500/50 bg-green-50/20 rounded-lg flex flex-col gap-2 shadow-sm">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="material-symbols-outlined text-green-600">person</span>
+        <h4 className="font-bold text-green-800 text-sm">{participant.rol}</h4>
+      </div>
+      <div className="text-xs text-on-surface flex flex-col gap-1">
+        <div><span className="font-semibold text-green-700">Nombre:</span> {participant.nombre}</div>
+        {!isNotario && participant.dui !== 'N/A' && (
+          <div><span className="font-semibold text-green-700">DUI:</span> {participant.dui}</div>
+        )}
+        <div><span className="font-semibold text-green-700">Dirección:</span> {participant.direccion}</div>
+        <div><span className="font-semibold text-green-700">Profesión/Estado:</span> {participant.profesion}</div>
+      </div>
+      
+      {!isNotario && !result && !uploading && (
+         <div className="mt-2 flex gap-2">
+           <input type="file" ref={fileInputRefFrente} style={{ display: 'none' }} accept="image/*,application/pdf" onChange={(e) => handleFileChange(e, setFrente)} />
+           <button onClick={() => fileInputRefFrente.current.click()} className={`${frente ? 'bg-green-800' : 'bg-green-600'} text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-green-700 transition-colors flex items-center gap-1`}>
+             <span className="material-symbols-outlined text-[14px]">{frente ? 'check_circle' : 'upload_file'}</span>
+             DUI Frente
+           </button>
+           
+           <input type="file" ref={fileInputRefVuelto} style={{ display: 'none' }} accept="image/*,application/pdf" onChange={(e) => handleFileChange(e, setVuelto)} />
+           <button onClick={() => fileInputRefVuelto.current.click()} className={`${vuelto ? 'bg-green-800' : 'bg-green-600'} text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-green-700 transition-colors flex items-center gap-1`}>
+             <span className="material-symbols-outlined text-[14px]">{vuelto ? 'check_circle' : 'upload_file'}</span>
+             DUI Vuelto
+           </button>
+         </div>
+      )}
+      
+      {uploading && (
+         <div className="mt-2 text-xs text-green-600 flex items-center gap-1 animate-pulse">
+           <span className="material-symbols-outlined text-[14px]">sync</span> Validando información...
+         </div>
+      )}
+      
+      {result && (
+         <div className="mt-2 text-xs bg-white p-2 rounded border border-green-200 text-on-surface">
+           <div className="font-bold text-green-700 mb-1 flex items-center gap-1">
+             <span className="material-symbols-outlined text-[14px]">fact_check</span> Resultado de validación:
+           </div>
+           <div className="whitespace-pre-wrap">{result}</div>
+           <button onClick={() => { setResult(null); setFrente(null); setVuelto(null); }} className="mt-2 text-[10px] text-green-600 underline hover:text-green-800">Volver a validar</button>
+         </div>
+      )}
+    </div>
+  );
+};
+
+const BienBlock = ({ tipo, atributosTexto }) => {
+  const atributos = atributosTexto.split(';').map(a => a.trim()).filter(a => a);
+  const esVehiculo = /veh[ií]culo|moto|carro|autom[oó]vil/i.test(tipo);
+
+  const [uploading, setUploading] = React.useState(false);
+  const [result, setResult] = React.useState(null);
+  const [frente, setFrente] = React.useState(null);
+  const [vuelto, setVuelto] = React.useState(null);
+  
+  const fileInputRefFrente = React.useRef(null);
+  const fileInputRefVuelto = React.useRef(null);
+
+  const handleFileChange = (e, setFileFn) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFileFn({
+          name: file.name,
+          type: file.type,
+          base64: reader.result.split(',')[1]
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  React.useEffect(() => {
+    const validate = async () => {
+      setUploading(true);
+      const prompt = `Por favor valida la siguiente información del vehículo extraída del documento, comparándola con las imágenes de la Tarjeta de Circulación adjuntas (frente y vuelto):\nTipo: ${tipo}\nDatos extraídos:\n${atributos.join('\n')}\n\nIndica si los datos (marca, modelo, año, placa, motor, chasis, etc.) coinciden o si hay discrepancias.`;
+      
+      try {
+        const response = await fetch("http://localhost:3001/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            message: prompt,
+            history: [],
+            modality: "AUDITORA",
+            files: [frente, vuelto]
+          })
+        });
+        const data = await response.json();
+        if (data.response) {
+          setResult(data.response);
+        } else {
+          setResult("Error en la validación.");
+        }
+      } catch (err) {
+        setResult("Error de red al validar.");
+      } finally {
+        setUploading(false);
+      }
+    };
+
+    if (frente && vuelto && !result && !uploading) {
+      validate();
+    }
+  }, [frente, vuelto, result, uploading, tipo, atributos]);
+
+  return (
+    <div className="my-2 p-3 border border-purple-500/50 bg-purple-50/20 rounded-lg flex flex-col gap-2 shadow-sm">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="material-symbols-outlined text-purple-600 text-[18px]">home_work</span>
+        <h4 className="font-bold text-purple-800 text-sm">{tipo}</h4>
+      </div>
+      <div className="text-xs text-on-surface flex flex-col gap-1">
+        {atributos.map((attr, idx) => {
+          const parts = attr.split(':');
+          if (parts.length < 2) {
+            return <div key={idx}>{attr}</div>;
+          }
+          const key = parts[0]?.trim();
+          const value = parts.slice(1).join(':')?.trim();
+          return (
+            <div key={idx}>
+              <span className="font-semibold text-purple-700">{key}:</span> {value}
+            </div>
+          );
+        })}
+      </div>
+      
+      {esVehiculo && !result && !uploading && (
+         <div className="mt-2 flex gap-2">
+           <input type="file" ref={fileInputRefFrente} style={{ display: 'none' }} accept="image/*,application/pdf" onChange={(e) => handleFileChange(e, setFrente)} />
+           <button onClick={() => fileInputRefFrente.current.click()} className={`${frente ? 'bg-purple-800' : 'bg-purple-600'} text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-purple-700 transition-colors flex items-center gap-1`}>
+             <span className="material-symbols-outlined text-[14px]">{frente ? 'check_circle' : 'upload_file'}</span>
+             Tarjeta Frente
+           </button>
+           
+           <input type="file" ref={fileInputRefVuelto} style={{ display: 'none' }} accept="image/*,application/pdf" onChange={(e) => handleFileChange(e, setVuelto)} />
+           <button onClick={() => fileInputRefVuelto.current.click()} className={`${vuelto ? 'bg-purple-800' : 'bg-purple-600'} text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-purple-700 transition-colors flex items-center gap-1`}>
+             <span className="material-symbols-outlined text-[14px]">{vuelto ? 'check_circle' : 'upload_file'}</span>
+             Tarjeta Vuelto
+           </button>
+         </div>
+      )}
+      
+      {uploading && (
+         <div className="mt-2 text-xs text-purple-600 flex items-center gap-1 animate-pulse">
+           <span className="material-symbols-outlined text-[14px]">sync</span> Validando información del vehículo...
+         </div>
+      )}
+      
+      {result && (
+         <div className="mt-2 text-xs bg-white p-2 rounded border border-purple-200 text-on-surface">
+           <div className="font-bold text-purple-700 mb-1 flex items-center gap-1">
+             <span className="material-symbols-outlined text-[14px]">fact_check</span> Resultado de validación:
+           </div>
+           <div className="whitespace-pre-wrap">{result}</div>
+           <button onClick={() => { setResult(null); setFrente(null); setVuelto(null); }} className="mt-2 text-[10px] text-purple-600 underline hover:text-purple-800">Volver a validar</button>
+         </div>
+      )}
+    </div>
+  );
 };
 
 export default function LexiaAssistant() {
   const [langMenuOpen, setLangMenuOpen] = React.useState(false);
+  const [userMenuOpen, setUserMenuOpen] = React.useState(false);
+  const [isLoginModalOpen, setIsLoginModalOpen] = React.useState(false);
+  const [currentUser, setCurrentUser] = React.useState(null);
+  const [loginForm, setLoginForm] = React.useState({ usuario_id: '', clave: '' });
+  const [loginError, setLoginError] = React.useState('');
   const [currentLang, setCurrentLang] = React.useState('ES');
   const [isDarkMode, setIsDarkMode] = React.useState(false);
   const [modality, setModality] = React.useState('ASISTENTE');
@@ -104,6 +369,36 @@ export default function LexiaAssistant() {
   const [rightWidth, setRightWidth] = React.useState(400);
   const [isResizingLeft, setIsResizingLeft] = React.useState(false);
   const [isResizingRight, setIsResizingRight] = React.useState(false);
+
+  const handleLoginSubmit = async (e) => {
+    e.preventDefault();
+    setLoginError('');
+    try {
+      const response = await fetch('http://localhost:3001/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(loginForm)
+      });
+      const data = await response.json();
+      if (response.ok && data.token) {
+        localStorage.setItem('jwtToken', data.token);
+        setCurrentUser(data.user);
+        setIsLoginModalOpen(false);
+        setUserMenuOpen(false);
+        setLoginForm({ usuario_id: '', clave: '' });
+      } else {
+        setLoginError(data.error || 'Error al iniciar sesión');
+      }
+    } catch (err) {
+      setLoginError('Error de conexión con el servidor');
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('jwtToken');
+    setCurrentUser(null);
+    setUserMenuOpen(false);
+  };
 
   const [chatsByModality, setChatsByModality] = React.useState({
     ASISTENTE: [],
@@ -261,14 +556,15 @@ export default function LexiaAssistant() {
 
         const customInstruction = `Analiza el documento adjunto y presenta el resultado de la siguiente manera estructurada:
 
-1. TIPO DE DOCUMENTO: Indica únicamente el tipo de documento.
-2. PARTICIPANTES: Lista cada participante como un bloque, línea por línea. Por ejemplo:
-MANDANTE (o la calidad que corresponda)
-- Nombre: [nombre]
-- DUI: [números]
-- Dirección: [dirección]
+1. TIPO DE DOCUMENTO: Usa la etiqueta exacta [TIPO_DOCUMENTO: Nombre del tipo de documento].
+2. PARTICIPANTES: Lista cada participante usando la siguiente sintaxis exacta por cada uno (usa corchetes y barras verticales, sin saltos de línea dentro del tag). IMPORTANTE: Si es persona jurídica, pon la info del representante legal, pero menciona el nombre de la empresa en el rol. Para el DUI extrae ÚNICAMENTE el formato numérico (ej. 12345678-9). Si el participante es el Notario, pon N/A en el DUI.
+[PARTICIPANTE: Rol del participante | Nombre completo | Número de DUI (solo números, o N/A) | Dirección completa | Profesión o Estado (si aplica, sino N/A)]
 
-3. AUDITORÍA Y CORRECCIONES (Oculto):
+3. BIENES: Si el documento menciona bienes muebles o inmuebles, lístalos. Por cada bien usa la siguiente sintaxis exacta (usa corchetes y barras verticales, sin saltos de línea dentro del tag):
+[BIEN: Tipo de Bien | Atributo 1: Valor 1 ; Atributo 2: Valor 2 ; Atributo 3: Valor 3 ...]
+Extrae TODOS los datos descriptivos y registrales que aparezcan en el documento para ese bien y sepáralos por un punto y coma (;). Por ejemplo, si es vehículo, incluye marca, modelo, año, color, placa, VIN, número de motor, capacidad, etc. Si es inmueble: extensión, ubicación, linderos, matrícula, valor, etc.
+
+4. AUDITORÍA Y CORRECCIONES (Oculto):
 Analiza el documento en busca de CUALQUIER tipo de problema: inconsistencias legales, de nombres, DUIs, ortografía, concordancia, o redacción. ES CRÍTICO que verifiques exhaustivamente la homogeneidad de los nombres y números de documento a lo largo de todo el texto.
 IMPORTANTE: Ignora los espacios en blanco o guiones bajos (______), no propongas correcciones para ellos.
 
@@ -488,20 +784,45 @@ Finalmente, pregúntame si deseo anexar más archivos (DUI u otros) para revisi�
 
   const renderChatMessage = (text, role) => {
     if (role === 'user') return text;
-    const errorRegex = /\[ERROR:\s*(.+?)\s*->\s*([^|\]]+?)(?:\s*\|\s*"([^"]+)")?\s*\]/g;
+    const combinedRegex = /(?:\[ERROR:\s*(.+?)\s*->\s*([^|\]]+?)(?:\s*\|\s*"([^"]+)")?\s*\])|(?:\[PARTICIPANTE:\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\])|(?:\[TIPO_DOCUMENTO:\s*(.+?)\s*\])|(?:\[BIEN:\s*(.+?)\s*\|\s*(.+?)\s*\])/g;
     
-    if (!text.match(errorRegex)) return text;
+    if (!text.match(combinedRegex)) return text;
     
     const parts = [];
     let lastIndex = 0;
     let match;
     
-    const regex = /\[ERROR:\s*(.+?)\s*->\s*([^|\]]+?)(?:\s*\|\s*"([^"]+)")?\s*\]/g;
-    while ((match = regex.exec(text)) !== null) {
+    while ((match = combinedRegex.exec(text)) !== null) {
       if (match.index > lastIndex) {
         parts.push(text.substring(lastIndex, match.index));
       }
-      const originalTextRaw = match[1].trim();
+      
+      if (match[0].startsWith('[TIPO_DOCUMENTO:')) {
+        const tipoDoc = match[9]?.trim() || '';
+        parts.push(
+          <div key={`doc-${match.index}`} className="my-2 p-3 border border-blue-500/50 bg-blue-50/20 rounded-lg flex flex-col gap-1 shadow-sm">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-blue-600 text-[18px]">description</span>
+              <h4 className="font-bold text-blue-800 text-sm">TIPO DE DOCUMENTO</h4>
+            </div>
+            <div className="text-xs text-on-surface font-medium mt-1">{tipoDoc}</div>
+          </div>
+        );
+      } else if (match[0].startsWith('[BIEN:')) {
+        const tipo = match[10]?.trim() || '';
+        const atributosTexto = match[11]?.trim() || '';
+        parts.push(<BienBlock key={`bien-${match.index}`} tipo={tipo} atributosTexto={atributosTexto} />);
+      } else if (match[0].startsWith('[PARTICIPANTE:')) {
+        const participant = {
+          rol: match[4]?.trim() || '',
+          nombre: match[5]?.trim() || '',
+          dui: match[6]?.trim() || '',
+          direccion: match[7]?.trim() || '',
+          profesion: match[8]?.trim() || ''
+        };
+        parts.push(<ParticipantBlock key={`part-${match.index}`} participant={participant} />);
+      } else {
+        const originalTextRaw = match[1].trim();
       const correctedTextRaw = match[2].trim();
       const explanationText = match[3];
       
@@ -579,8 +900,9 @@ Finalmente, pregúntame si deseo anexar más archivos (DUI u otros) para revisi�
           </div>
         );
       }
+      }
       
-      lastIndex = regex.lastIndex;
+      lastIndex = combinedRegex.lastIndex;
     }
     
     if (lastIndex < text.length) {
@@ -828,6 +1150,39 @@ Finalmente, pregúntame si deseo anexar más archivos (DUI u otros) para revisi�
                   </div>
                 )}
               </div>
+              <div className="relative">
+                <button 
+                  onClick={() => setUserMenuOpen(!userMenuOpen)}
+                  className="flex items-center gap-1 text-[#49454f] hover:text-[#1c1b1f] transition-colors hover:bg-black/5 px-2 py-1 rounded-md"
+                >
+                  <span className="material-symbols-outlined text-[18px]">
+                    account_circle
+                  </span>
+                  <span className="text-xs font-bold text-[#1c1b1f]">{currentUser ? currentUser.nombre : t.userMenu}</span>
+                  <span className="material-symbols-outlined text-[16px]">
+                    expand_more
+                  </span>
+                </button>
+                {userMenuOpen && (
+                  <div className="absolute top-full right-0 mt-1 w-32 bg-white border border-[#cac4d0]/30 rounded-lg shadow-lg py-1 z-50 flex flex-col">
+                    {!currentUser ? (
+                      <button 
+                        onClick={() => { setIsLoginModalOpen(true); setUserMenuOpen(false); }}
+                        className="text-left px-3 py-2 text-sm hover:bg-black/5 transition-colors text-[#1c1b1f]"
+                      >
+                        {t.login}
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={handleLogout}
+                        className="text-left px-3 py-2 text-sm hover:bg-black/5 transition-colors text-[#1c1b1f]"
+                      >
+                        {t.logout}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
               <div className="h-6 w-px bg-[#cac4d0]/50 mx-stack-sm"></div>
               <img
                 src="https://lh3.googleusercontent.com/aida-public/AB6AXuCyXLlLzzfKIXyZ7QV5sGUY5NBYGpc7lScZtY1d7nF9GL2OPnyfZ0IrdSYcLq1Jx2zpKF819l77qRw-N2hhyLaHqbsdgj1ATdvHGg1t1s4jv3EMWgvffwH4HXxM3A26hQYdLqZMW6E-Oo8w_5CkLHVA1U9tZoMf08y6aLdqmM0n_3aCJq-mHQuO9vubDgH8qqM1aFrhoyR3eH1-8fswrA_M_9qNnINtVxYDP4hZvyntdUM-Jc0uTWGgUZJtyrY3UPk8iXc"
@@ -895,7 +1250,7 @@ Finalmente, pregúntame si deseo anexar más archivos (DUI u otros) para revisi�
                         <span className="material-symbols-outlined text-[16px]">
                           save
                         </span>
-                        <span className="text-[13px] font-medium">Guardar</span>
+                        <span className="text-[13px] font-medium">{t.saveBtn}</span>
                       </button>
                     </div>
                   </div>
@@ -963,9 +1318,9 @@ Finalmente, pregúntame si deseo anexar más archivos (DUI u otros) para revisi�
             </div>
             <div className="flex bg-surface-container-highest rounded-lg p-1 border border-outline-variant/20 gap-1">
               {[
-                { id: 'ASISTENTE', icon: 'support_agent', title: t.createBtnDesc },
-                { id: 'ASESORA', icon: 'balance', title: t.adviseBtnDesc },
-                { id: 'AUDITORA', icon: 'fact_check', title: t.reviewBtnDesc }
+                { id: 'ASISTENTE', label: t.asistenteLabel, icon: 'support_agent', title: t.createBtnDesc },
+                { id: 'ASESORA', label: t.asesoraLabel, icon: 'balance', title: t.adviseBtnDesc },
+                { id: 'AUDITORA', label: t.auditoraLabel, icon: 'fact_check', title: t.reviewBtnDesc }
               ].map(mod => (
                 <button
                   key={mod.id}
@@ -978,7 +1333,7 @@ Finalmente, pregúntame si deseo anexar más archivos (DUI u otros) para revisi�
                   }`}
                 >
                   <span className="material-symbols-outlined text-[14px]">{mod.icon}</span>
-                  {mod.id}
+                  {mod.label}
                 </button>
               ))}
             </div>
@@ -986,16 +1341,16 @@ Finalmente, pregúntame si deseo anexar más archivos (DUI u otros) para revisi�
           <div className="flex-1 overflow-y-auto p-stack-md space-y-stack-md flex flex-col chat-scrollbar">
             {(chatsByModality[modality] || []).length === 0 ? (
               <div className="bg-surface-container p-stack-sm rounded-lg text-xs text-on-surface-variant border-l-4 border-secondary flex flex-col gap-2 items-start">
-                {modality === 'ASISTENTE' && <span>¿Qué documento quieres que creemos?</span>}
-                {modality === 'ASESORA' && <span>Hola, soy LexIA tu asesora legal. ¿En qué puedo ayudarle ahora?</span>}
+                {modality === 'ASISTENTE' && <span>{t.asistenteMsg}</span>}
+                {modality === 'ASESORA' && <span>{t.asesoraMsg}</span>}
                 {modality === 'AUDITORA' && (
                   <>
-                    <span>¿Qué documento desea analizar?</span>
+                    <span>{t.auditoraMsg}</span>
                     <button 
                       onClick={() => fileInputRefAuditora.current.click()} 
                       className="bg-primary text-on-primary px-3 py-1.5 rounded-md text-[11px] font-bold hover:bg-primary/90 transition-colors"
                     >
-                      Añadir documento
+                      {t.addDocBtn}
                     </button>
                   </>
                 )}
@@ -1099,6 +1454,51 @@ Finalmente, pregúntame si deseo anexar más archivos (DUI u otros) para revisi�
         </div>
       </aside>
       </div>
+      {isLoginModalOpen && (
+        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-96 max-w-[90%]">
+            <h2 className="text-xl font-bold mb-4 text-[#1c1b1f]">{t.loginTitle}</h2>
+            <form onSubmit={handleLoginSubmit} className="flex flex-col gap-4">
+              {loginError && <div className="text-red-500 text-sm bg-red-50 p-2 rounded border border-red-200">{loginError}</div>}
+              <div>
+                <label className="block text-sm font-medium text-on-surface-variant mb-1">{t.usernamePlaceholder}</label>
+                <input 
+                  type="text" 
+                  value={loginForm.usuario_id}
+                  onChange={(e) => setLoginForm({...loginForm, usuario_id: e.target.value})}
+                  className="w-full border border-outline-variant rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-on-surface-variant mb-1">{t.passwordPlaceholder}</label>
+                <input 
+                  type="password" 
+                  value={loginForm.clave}
+                  onChange={(e) => setLoginForm({...loginForm, clave: e.target.value})}
+                  className="w-full border border-outline-variant rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  required
+                />
+              </div>
+              <div className="flex justify-end gap-2 mt-2">
+                <button 
+                  type="button" 
+                  onClick={() => setIsLoginModalOpen(false)}
+                  className="px-4 py-2 text-sm font-medium text-on-surface-variant hover:bg-surface-container-high rounded-lg transition-colors"
+                >
+                  {t.cancelBtn}
+                </button>
+                <button 
+                  type="submit" 
+                  className="px-4 py-2 text-sm font-medium bg-primary text-on-primary hover:bg-primary/90 rounded-lg transition-colors"
+                >
+                  {t.enterBtn}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }
