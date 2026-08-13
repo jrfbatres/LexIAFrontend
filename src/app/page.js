@@ -612,6 +612,27 @@ export default function LexiaAssistant() {
   };
 
   const handleCorrectError = (originalText, correctedText, index = 0, errorKey) => {
+    const isSaltoDeLinea = originalText.includes("SALTO DE LÍNEA") || originalText.includes("PÁRRAFO");
+    if (isSaltoDeLinea) {
+      let appliedData = { type: 'full-document', chosen: correctedText, originals: [] };
+      setEditorTabs(prevTabs => {
+        return prevTabs.map(tab => {
+          if (tab.id === activeTabId) {
+            appliedData.originals.push({ text: tab.content });
+            let newContent = tab.content.replace(/<\/p>\s*<p>/gi, ' ');
+            newContent = newContent.replace(/<br\s*\/?>/gi, ' ');
+            return { ...tab, content: newContent };
+          }
+          return tab;
+        });
+      });
+      setCorrectedErrors(prev => ({ ...prev, [errorKey]: appliedData }));
+      if (selectedErrorInfo?.errorKey === errorKey) {
+        setSelectedErrorInfo(null);
+      }
+      return;
+    }
+
     const originalOptions = originalText.split(/\s*"?\s+OR\s+"?\s*/i).map(s => s.replace(/(^"|"$)/g, '').trim());
     const isGlobal = originalOptions.length > 1;
     const safeKey = errorKey.replace(/[^a-zA-Z0-9-]/g, '-');
@@ -641,11 +662,11 @@ export default function LexiaAssistant() {
              const replacementHtml = `<strong id="error-${safeKey}"><span style="color: #16a34a">${correctedText}</span></strong>`;
              appliedData.originals.push({ text: originalText });
              
-             const highlightRegex = new RegExp(`<mark[^>]*>${escapeRegExp(originalText)}</mark>`, 'gi');
+             const highlightRegex = new RegExp(`<mark[^>]*>${escapeRegExp(originalText).replace(/\\s+/g, '\\\\s+')}</mark>`, 'gi');
              if (newContent.match(highlightRegex)) {
                newContent = newContent.replace(highlightRegex, replacementHtml);
              } else {
-               const regex = new RegExp(`(?<=^|\\W)${escapeRegExp(originalText)}(?=\\W|$)`, 'i');
+               const regex = new RegExp(`(?<=^|\\W|>)${escapeRegExp(originalText).replace(/\\s+/g, '(?:\\\\s|&nbsp;|<[^>]+>)+')}(?=\\W|<|$)`, 'i');
                newContent = replaceNthOccurrence(newContent, regex, replacementHtml, index);
              }
           }
@@ -669,7 +690,9 @@ export default function LexiaAssistant() {
         if (tab.id === activeTabId) {
           let newContent = tab.content;
           
-          if (appliedData.type === 'global') {
+          if (appliedData.type === 'full-document') {
+             newContent = appliedData.originals[0].text;
+          } else if (appliedData.type === 'global') {
              appliedData.originals.forEach(orig => {
                const regex = new RegExp(`(?:<[^>]+>)+${escapeRegExp(appliedData.chosen)}(?:<\\/[^>]+>)+`, 'i');
                if (newContent.match(regex)) {
@@ -743,9 +766,9 @@ export default function LexiaAssistant() {
                }, 150);
             }
           } else {
-             const highlightRegex = new RegExp(`<mark[^>]*>${escapeRegExp(originalText)}</mark>`, 'gi');
+             const highlightRegex = new RegExp(`<mark[^>]*>${escapeRegExp(originalText).replace(/\\s+/g, '\\\\s+')}</mark>`, 'gi');
              if (isHovering && !newContent.match(highlightRegex)) {
-               const regex = new RegExp(`(?<=^|\\W)${escapeRegExp(originalText)}(?=\\W|$)`, 'i');
+               const regex = new RegExp(`(?<=^|\\W|>)${escapeRegExp(originalText).replace(/\\s+/g, '(?:\\\\s|&nbsp;|<[^>]+>)+')}(?=\\W|<|$)`, 'i');
                newContent = replaceNthOccurrence(newContent, regex, `<mark>${originalText}</mark>`, index);
                setTimeout(() => {
                  const mark = document.querySelector('.ProseMirror mark');
