@@ -158,7 +158,7 @@ const ParticipantBlock = ({ participant }) => {
       const prompt = `Por favor valida la siguiente información del participante contra las imágenes del DUI (frente y vuelto) adjuntas:\nRol: ${participant.rol}\nNombre: ${participant.nombre}\nDUI: ${participant.dui}\nDirección: ${participant.direccion}\nProfesión/Estado: ${participant.profesion}\n\nIndica si los datos coinciden o si hay discrepancias.`;
       
       try {
-        const response = await fetch("http://localhost:3001/api/chat", {
+        const response = await fetch("https://lexiabackend-lexia-backend.3hzy53.easypanel.host/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
@@ -269,7 +269,7 @@ const BienBlock = ({ tipo, atributosTexto }) => {
       const prompt = `Por favor valida la siguiente información del vehículo extraída del documento, comparándola con las imágenes de la Tarjeta de Circulación adjuntas (frente y vuelto):\nTipo: ${tipo}\nDatos extraídos:\n${atributos.join('\n')}\n\nIndica si los datos (marca, modelo, año, placa, motor, chasis, etc.) coinciden o si hay discrepancias.`;
       
       try {
-        const response = await fetch("http://localhost:3001/api/chat", {
+        const response = await fetch("https://lexiabackend-lexia-backend.3hzy53.easypanel.host/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
@@ -374,7 +374,7 @@ export default function LexiaAssistant() {
     e.preventDefault();
     setLoginError('');
     try {
-      const response = await fetch('http://localhost:3001/api/login', {
+      const response = await fetch('https://lexiabackend-lexia-backend.3hzy53.easypanel.host/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(loginForm)
@@ -1114,7 +1114,7 @@ export default function LexiaAssistant() {
     setIsChatLoading(true);
     
     try {
-      const response = await fetch("http://localhost:3001/api/chat", {
+      const response = await fetch("https://lexiabackend-lexia-backend.3hzy53.easypanel.host/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
